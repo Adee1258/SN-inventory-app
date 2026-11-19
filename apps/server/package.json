@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -b",
-    "vercel-build": "node ../../scripts/build-server.mjs",
+    "vercel-build": "echo 'server build skipped on vercel - bundled via root vercel-build'",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "clean": "rimraf dist"

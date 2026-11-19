@@ -8,5 +8,6 @@
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.js" }
-  ]
+  ],
+  "buildCommand": "prisma generate --schema=./prisma/schema.prisma && node scripts/build-server.mjs"
 }
