@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "buildCommand": "prisma generate --schema=./prisma/schema.prisma && node scripts/build-server.mjs",
+  "outputDirectory": ".",
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
@@ -8,6 +10,5 @@
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.js" }
-  ],
-  "buildCommand": "prisma generate --schema=./prisma/schema.prisma && node scripts/build-server.mjs"
+  ]
 }

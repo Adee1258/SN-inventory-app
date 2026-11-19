@@ -1,11 +1,9 @@
 {
   "name": "@erp/server",
   "version": "1.0.0",
-  "type": "module",
-  "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -b",
-    "vercel-build": "echo 'server build skipped on vercel - bundled via root vercel-build'",
+    "vercel-build": "echo skipped",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "clean": "rimraf dist"
