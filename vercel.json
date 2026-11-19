@@ -1,18 +1,10 @@
 {
   "version": 2,
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "npm run build --workspace=@erp/desktop",
   "outputDirectory": "apps/desktop/dist",
   "rewrites": [
     {
-      "source": "/api/v1/:match*",
-      "destination": "/api"
-    },
-    {
-      "source": "/health",
-      "destination": "/api"
-    },
-    {
-      "source": "/((?!api/|assets/|favicon.ico).*)",
+      "source": "/((?!assets/|favicon.ico).*)",
       "destination": "/index.html"
     }
   ]

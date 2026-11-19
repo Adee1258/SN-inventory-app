@@ -2,12 +2,17 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./src",
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "paths": {
+      "@erp/shared-types": ["../../packages/shared-types/src/index.ts"],
+      "@erp/business-rules": ["../../packages/business-rules/src/index.ts"],
+      "@erp/validation": ["../../packages/validation/src/index.ts"]
+    }
   },
-  "references": [
-    { "path": "../../packages/shared-types" },
-    { "path": "../../packages/business-rules" },
-    { "path": "../../packages/validation" }
-  ],
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*",
+    "../../packages/shared-types/src/**/*",
+    "../../packages/business-rules/src/**/*",
+    "../../packages/validation/src/**/*"
+  ]
 }
