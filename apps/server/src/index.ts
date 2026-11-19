@@ -76,7 +76,13 @@ app.use('/api/v1/settings', settingsRoutes);
 app.use(errorHandler);
 
 // Start Server (only when running as a standalone local server, NOT serverless)
-const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+// NOTE: process.env.VERCEL is set by api/index.js BEFORE requiring this bundle,
+// so this check correctly resolves to true on Vercel and prevents app.listen().
+const isServerless = !!(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.NOW_REGION
+);
 
 if (process.env.NODE_ENV !== 'test' && !isServerless) {
   app.listen(ENV.PORT, ENV.API_HOST, async () => {
