@@ -43030,6 +43030,16 @@ app.use(import_express13.default.urlencoded({ extended: true }));
 if (ENV.NODE_ENV !== "test") {
   app.use((0, import_morgan.default)("dev"));
 }
+app.get("/", (_req, res) => {
+  return res.json({
+    status: "OK",
+    application: "Wholesale / Ghalla Mandi ERP Backend API",
+    message: "Server is running online on Vercel!",
+    health: "/health",
+    version: "1.0.0",
+    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+  });
+});
 app.get("/health", async (_req, res) => {
   const isDbConnected = await checkDatabaseConnection();
   return res.json({

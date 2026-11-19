@@ -35,6 +35,17 @@ if (ENV.NODE_ENV !== 'test') {
 }
 
 // Health Check
+app.get('/', (_req: Request, res: Response) => {
+  return res.json({
+    status: 'OK',
+    application: 'Wholesale / Ghalla Mandi ERP Backend API',
+    message: 'Server is running online on Vercel!',
+    health: '/health',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/health', async (_req: Request, res: Response) => {
   const isDbConnected = await checkDatabaseConnection();
   return res.json({
