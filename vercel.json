@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "installCommand": "npm install --ignore-scripts=false",
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "apps/desktop/dist",
   "functions": {
@@ -9,8 +10,8 @@
     }
   },
   "rewrites": [
-    { "source": "/api/v1/:match*", "destination": "/api/index.js" },
-    { "source": "/health",         "destination": "/api/index.js" },
-    { "source": "/((?!assets/|favicon.ico|api/).*)", "destination": "/index.html" }
+    { "source": "/api/v1/:path*", "destination": "/api/index.js" },
+    { "source": "/health",        "destination": "/api/index.js" },
+    { "source": "/((?!assets/|favicon\\.ico|api/).*)", "destination": "/index.html" }
   ]
 }

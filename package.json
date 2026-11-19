@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "vercel-build": "npm run build --workspace=apps/server && npm run build --workspace=apps/desktop",
+    "vercel-build": "prisma generate --schema=./prisma/schema.prisma && npm run build --workspace=apps/server && npm run build --workspace=apps/desktop",
     "postinstall": "prisma generate --schema=./prisma/schema.prisma",
     "test": "npm run test --workspaces",
     "server": "npm run dev --workspace=@erp/server",
