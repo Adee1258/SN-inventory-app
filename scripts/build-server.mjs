@@ -7,8 +7,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 console.log('🔨 Bundling server with esbuild...');
 
-// Output to apps/server/dist/bundle.js AND api/_bundle.js
+// Output bundled server to all necessary entry points
 const targets = [
+  `${root}/apps/server/dist/index.js`,
   `${root}/apps/server/dist/bundle.js`,
   `${root}/api/_bundle.js`,
 ];
