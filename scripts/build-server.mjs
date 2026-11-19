@@ -22,10 +22,10 @@ for (const outfile of targets) {
     target: 'node20',
     format: 'cjs',
     outfile,
-    // @prisma/client must NOT be external on Vercel — it needs to be bundled
-    // because Vercel serverless runtime cannot resolve workspace node_modules at runtime.
-    // Only exclude the native .node binary engine (handled separately by prisma generate).
-    external: [],
+    // @prisma/client is kept external so Prisma can resolve its query engine
+    // binary (.node file) at runtime using __dirname — bundling it breaks that path resolution.
+    // Vercel picks up node_modules/@prisma/client via file tracing automatically.
+    external: ['@prisma/client'],
     tsconfig: `${root}/apps/server/tsconfig.json`,
     logLevel: 'warning',
     sourcemap: false,
