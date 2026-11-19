@@ -1,0 +1,984 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum StockOwnershipType {
+  OWN
+  CONSIGNMENT
+}
+
+enum StockBatchSourceType {
+  OPENING
+  PURCHASE
+  CONSIGNMENT_RECEIPT
+}
+
+enum StockBatchStatus {
+  ACTIVE
+  EXHAUSTED
+  QUARANTINED
+  CANCELLED
+}
+
+enum StockMovementType {
+  OPENING
+  PURCHASE_IN
+  CONSIGNMENT_IN
+  SALE_OUT
+  PURCHASE_RETURN_OUT
+  SALE_RETURN_IN
+  CONSIGNMENT_RETURN_OUT
+  DAMAGE_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  REVERSAL
+}
+
+enum AccountCategory {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  CONTRA_INCOME
+  EXPENSE
+}
+
+enum PaymentMethod {
+  CASH
+  BANK
+  CREDIT
+  PARTIAL
+}
+
+enum DocumentReferenceType {
+  OPENING_STOCK
+  PURCHASE_INVOICE
+  PURCHASE_RETURN
+  CONSIGNMENT_RECEIPT
+  CONSIGNMENT_RETURN
+  SALE_INVOICE
+  SALE_RETURN
+  SUPPLIER_SETTLEMENT
+  SUPPLIER_ADVANCE
+  RECEIPT_VOUCHER
+  PAYMENT_VOUCHER
+  STOCK_ADJUSTMENT
+  JOURNAL_ENTRY
+  COMMISSION_EXPENSE
+}
+
+enum SyncStatus {
+  PENDING
+  ACKNOWLEDGED
+  FAILED
+  CONFLICT
+}
+
+// ----------------------------------------------------
+// 1. SYSTEM & CONFIGURATION
+// ----------------------------------------------------
+
+model BusinessProfile {
+  id               BigInt   @id @default(autoincrement())
+  uuid             String   @unique @default(uuid()) @db.VarChar(36)
+  businessName     String   @db.VarChar(150)
+  tradeLicenseNo   String?  @db.VarChar(50)
+  taxNumber        String?  @db.VarChar(50)
+  phone            String   @db.VarChar(30)
+  email            String?  @db.VarChar(100)
+  address          String?  @db.Text
+  mandiLocation    String?  @db.VarChar(100)
+  currencySymbol   String   @default("Rs.") @db.VarChar(10)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("business_profile")
+}
+
+model AppSettings {
+  id                     BigInt   @id @default(autoincrement())
+  uuid                   String   @unique @default(uuid()) @db.VarChar(36)
+  settingKey             String   @unique @db.VarChar(100)
+  settingValue           String   @db.Text
+  description            String?  @db.VarChar(255)
+  updatedAt              DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model OwnerAuth {
+  id           BigInt   @id @default(autoincrement())
+  uuid         String   @unique @default(uuid()) @db.VarChar(36)
+  username     String   @unique @db.VarChar(50)
+  passwordHash String   @db.VarChar(255)
+  masterPinHash String  @db.VarChar(255)
+  salt         String   @db.VarChar(64)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("owner_auth")
+}
+
+model RegisteredDevice {
+  id           BigInt    @id @default(autoincrement())
+  uuid         String    @unique @default(uuid()) @db.VarChar(36)
+  deviceName   String    @db.VarChar(100)
+  deviceToken  String    @unique @db.VarChar(255)
+  ipAddress    String?   @db.VarChar(45)
+  macAddress   String?   @db.VarChar(50)
+  isAuthorized Boolean   @default(true)
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("registered_devices")
+}
+
+model FinancialYear {
+  id         BigInt             @id @default(autoincrement())
+  uuid       String             @unique @default(uuid()) @db.VarChar(36)
+  yearCode   String             @unique @db.VarChar(20)
+  startDate  DateTime           @db.Date
+  endDate    DateTime           @db.Date
+  isClosed   Boolean            @default(false)
+  createdAt  DateTime           @default(now())
+  periods    AccountingPeriod[]
+
+  @@map("financial_years")
+}
+
+model AccountingPeriod {
+  id              BigInt        @id @default(autoincrement())
+  financialYearId BigInt
+  periodNumber    Int
+  startDate       DateTime      @db.Date
+  endDate         DateTime      @db.Date
+  isClosed        Boolean       @default(false)
+  financialYear   FinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_periods")
+}
+
+model DocumentSequence {
+  id             BigInt   @id @default(autoincrement())
+  sequenceType   String   @unique @db.VarChar(50)
+  prefix         String   @db.VarChar(20)
+  currentNumber  BigInt   @default(0)
+  paddingLength  Int      @default(5)
+  updatedAt      DateTime @updatedAt
+
+  @@map("document_sequences")
+}
+
+// ----------------------------------------------------
+// 2. MASTER CATALOG & UNITS
+// ----------------------------------------------------
+
+model Unit {
+  id            BigInt                @id @default(autoincrement())
+  uuid          String                @unique @default(uuid()) @db.VarChar(36)
+  code          String                @unique @db.VarChar(20)
+  name          String                @db.VarChar(50)
+  symbol        String                @db.VarChar(10)
+  isBaseUnit    Boolean               @default(false)
+  createdAt     DateTime              @default(now())
+  itemsBase     Item[]                @relation("ItemBaseUnit")
+  conversions   ItemUnitConversion[]
+
+  @@map("units")
+}
+
+model ItemCategory {
+  id        BigInt   @id @default(autoincrement())
+  uuid      String   @unique @default(uuid()) @db.VarChar(36)
+  code      String   @unique @db.VarChar(30)
+  name      String   @db.VarChar(100)
+  createdAt DateTime @default(now())
+  items     Item[]
+
+  @@map("item_categories")
+}
+
+model Item {
+  id                  BigInt                 @id @default(autoincrement())
+  uuid                String                 @unique @default(uuid()) @db.VarChar(36)
+  code                String                 @unique @db.VarChar(30)
+  name                String                 @db.VarChar(100)
+  categoryId          BigInt
+  baseUnitId          BigInt
+  description         String?                @db.Text
+  minStockLevel       Decimal                @default(0.000000) @db.Decimal(19, 6)
+  defaultSaleRate     Decimal?               @db.Decimal(19, 4)
+  isActive            Boolean                @default(true)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  category            ItemCategory           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  baseUnit            Unit                   @relation("ItemBaseUnit", fields: [baseUnitId], references: [id], onDelete: Restrict)
+  conversions         ItemUnitConversion[]
+  stockBatches        StockBatch[]
+  stockMovements      StockMovement[]
+  commissionAgreements CommissionAgreement[]
+  openingStockItems   OpeningStockItem[]
+  purchaseInvoiceItems PurchaseInvoiceItem[]
+  consignmentReceiptItems ConsignmentReceiptItem[]
+  salesInvoiceItems   SalesInvoiceItem[]
+
+  @@index([categoryId])
+  @@index([baseUnitId])
+  @@map("items")
+}
+
+model ItemUnitConversion {
+  id               BigInt   @id @default(autoincrement())
+  uuid             String   @unique @default(uuid()) @db.VarChar(36)
+  itemId           BigInt
+  unitId           BigInt
+  multiplierToBase Decimal  @db.Decimal(19, 8)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  item             Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  unit             Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+
+  @@unique([itemId, unitId])
+  @@map("item_unit_conversions")
+}
+
+// ----------------------------------------------------
+// 3. PARTIES & HUMAN RESOURCES
+// ----------------------------------------------------
+
+model Customer {
+  id             BigInt         @id @default(autoincrement())
+  uuid           String         @unique @default(uuid()) @db.VarChar(36)
+  code           String         @unique @db.VarChar(30)
+  name           String         @db.VarChar(100)
+  phone          String         @db.VarChar(30)
+  address        String?        @db.Text
+  openingBalance Decimal        @default(0.0000) @db.Decimal(19, 4)
+  currentBalance Decimal        @default(0.0000) @db.Decimal(19, 4)
+  creditLimit    Decimal?       @db.Decimal(19, 4)
+  notes          String?        @db.Text
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  salesInvoices  SalesInvoice[]
+  salesReturns   SalesReturn[]
+
+  @@map("customers")
+}
+
+model Supplier {
+  id                        BigInt                 @id @default(autoincrement())
+  uuid                      String                 @unique @default(uuid()) @db.VarChar(36)
+  code                      String                 @unique @db.VarChar(30)
+  name                      String                 @db.VarChar(100)
+  phone                     String                 @db.VarChar(30)
+  address                   String?                @db.Text
+  openingBalanceOwn         Decimal                @default(0.0000) @db.Decimal(19, 4)
+  openingBalanceConsignment Decimal                @default(0.0000) @db.Decimal(19, 4)
+  currentBalanceOwn         Decimal                @default(0.0000) @db.Decimal(19, 4)
+  currentBalanceConsignment Decimal                @default(0.0000) @db.Decimal(19, 4)
+  notes                     String?                @db.Text
+  isActive                  Boolean                @default(true)
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  stockBatches              StockBatch[]
+  purchaseInvoices          PurchaseInvoice[]
+  purchaseReturns           PurchaseReturn[]
+  consignmentReceipts       ConsignmentReceipt[]
+  consignmentReturns        ConsignmentReturn[]
+  commissionAgreements      CommissionAgreement[]
+  supplierSettlements       SupplierSettlement[]
+  supplierAdvances          SupplierAdvance[]
+  openingStockItems         OpeningStockItem[]
+
+  @@map("suppliers")
+}
+
+model Employee {
+  id          BigInt   @id @default(autoincrement())
+  uuid        String   @unique @default(uuid()) @db.VarChar(36)
+  name        String   @db.VarChar(100)
+  phone       String   @db.VarChar(30)
+  address     String?  @db.Text
+  jobTitle    String   @db.VarChar(50)
+  salary      Decimal  @default(0.0000) @db.Decimal(19, 4)
+  joiningDate DateTime @db.Date
+  notes       String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("employees")
+}
+
+// ----------------------------------------------------
+// 4. OPENING INVENTORY (RAW MATERIAL / OPENING STOCK)
+// ----------------------------------------------------
+
+model OpeningStockEntry {
+  id          BigInt             @id @default(autoincrement())
+  uuid        String             @unique @default(uuid()) @db.VarChar(36)
+  entryNumber String             @unique @db.VarChar(50)
+  entryDate   DateTime           @db.Date
+  notes       String?            @db.Text
+  isFinalized Boolean            @default(false)
+  createdAt   DateTime           @default(now())
+  items       OpeningStockItem[]
+
+  @@map("opening_stock_entries")
+}
+
+model OpeningStockItem {
+  id                   BigInt             @id @default(autoincrement())
+  uuid                 String             @unique @default(uuid()) @db.VarChar(36)
+  openingStockEntryId  BigInt
+  itemId               BigInt
+  ownershipType        StockOwnershipType
+  supplierId           BigInt?
+  enteredQuantity      Decimal            @db.Decimal(19, 6)
+  enteredUnitName      String             @db.VarChar(50)
+  conversionFactorSnap Decimal            @db.Decimal(19, 8)
+  baseQuantity         Decimal            @db.Decimal(19, 6)
+  baseUnitName         String             @db.VarChar(20)
+  unitCost             Decimal            @default(0.0000) @db.Decimal(19, 4)
+  referenceValuation   Decimal?           @db.Decimal(19, 4)
+  batchNumber          String             @db.VarChar(50)
+  notes                String?            @db.Text
+
+  openingStockEntry    OpeningStockEntry  @relation(fields: [openingStockEntryId], references: [id], onDelete: Cascade)
+  item                 Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  supplier             Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([openingStockEntryId])
+  @@index([itemId])
+  @@index([supplierId])
+  @@map("opening_stock_items")
+}
+
+// ----------------------------------------------------
+// 5. CENTRAL INVENTORY & FIFO BATCHES
+// ----------------------------------------------------
+
+model StockBatch {
+  id                   BigInt               @id @default(autoincrement())
+  uuid                 String               @unique @default(uuid()) @db.VarChar(36)
+  batchNumber          String               @unique @db.VarChar(50)
+  itemId               BigInt
+  ownershipType        StockOwnershipType
+  sourceType           StockBatchSourceType
+  sourceDocumentId     BigInt
+  supplierId           BigInt?
+  receivedDate         DateTime             @db.Date
+  initialBaseQty       Decimal              @db.Decimal(19, 6)
+  remainingBaseQty     Decimal              @db.Decimal(19, 6)
+  baseUnitName         String               @default("KG") @db.VarChar(20)
+  unitCost             Decimal              @default(0.0000) @db.Decimal(19, 4)
+  referenceValuation   Decimal?             @db.Decimal(19, 4)
+  status               StockBatchStatus     @default(ACTIVE)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  item                 Item                 @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  supplier             Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  stockMovements       StockMovement[]
+  stockAllocations     StockAllocation[]
+
+  @@index([itemId, ownershipType, status, receivedDate, id])
+  @@index([supplierId])
+  @@map("stock_batches")
+}
+
+model StockMovement {
+  id                   BigInt            @id @default(autoincrement())
+  uuid                 String            @unique @default(uuid()) @db.VarChar(36)
+  batchId              BigInt
+  itemId               BigInt
+  ownershipType        StockOwnershipType
+  supplierId           BigInt?
+  movementType         StockMovementType
+  enteredQuantity      Decimal           @db.Decimal(19, 6)
+  enteredUnitName      String            @db.VarChar(50)
+  conversionFactorSnap Decimal           @db.Decimal(19, 8)
+  baseQuantity         Decimal           @db.Decimal(19, 6)
+  baseUnitName         String            @default("KG") @db.VarChar(20)
+  referenceType        DocumentReferenceType
+  referenceId          BigInt
+  referenceNumber      String            @db.VarChar(50)
+  movementDate         DateTime          @db.Date
+  createdAt            DateTime          @default(now())
+
+  batch                StockBatch        @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  item                 Item              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([batchId])
+  @@index([itemId])
+  @@index([movementDate])
+  @@map("stock_movements")
+}
+
+model StockAllocation {
+  id                   BigInt             @id @default(autoincrement())
+  uuid                 String             @unique @default(uuid()) @db.VarChar(36)
+  batchId              BigInt
+  salesInvoiceItemId   BigInt
+  allocatedBaseQty     Decimal            @db.Decimal(19, 6)
+  unitCost             Decimal            @default(0.0000) @db.Decimal(19, 4)
+  totalCost            Decimal            @default(0.0000) @db.Decimal(19, 4)
+  createdAt            DateTime           @default(now())
+
+  batch                StockBatch         @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  salesInvoiceItem     SalesInvoiceItem   @relation(fields: [salesInvoiceItemId], references: [id], onDelete: Restrict)
+
+  @@index([batchId])
+  @@index([salesInvoiceItemId])
+  @@map("stock_allocations")
+}
+
+// ----------------------------------------------------
+// 6. PURCHASES (OWN STOCK ONLY)
+// ----------------------------------------------------
+
+model PurchaseInvoice {
+  id               BigInt                @id @default(autoincrement())
+  uuid             String                @unique @default(uuid()) @db.VarChar(36)
+  invoiceNumber    String                @unique @db.VarChar(50)
+  supplierInvoiceNo String?              @db.VarChar(50)
+  supplierId       BigInt
+  invoiceDate      DateTime              @db.Date
+  paymentMethod    PaymentMethod
+  grossAmount      Decimal               @db.Decimal(19, 4)
+  discountAmount   Decimal               @default(0.0000) @db.Decimal(19, 4)
+  freightAmount    Decimal               @default(0.0000) @db.Decimal(19, 4)
+  loadingAmount    Decimal               @default(0.0000) @db.Decimal(19, 4)
+  netLandedAmount  Decimal               @db.Decimal(19, 4)
+  paidAmount       Decimal               @default(0.0000) @db.Decimal(19, 4)
+  remainingBalance Decimal               @default(0.0000) @db.Decimal(19, 4)
+  notes            String?               @db.Text
+  createdAt        DateTime              @default(now())
+
+  supplier         Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items            PurchaseInvoiceItem[]
+  purchaseReturns  PurchaseReturn[]
+
+  @@index([supplierId])
+  @@index([invoiceDate])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceItem {
+  id                   BigInt          @id @default(autoincrement())
+  uuid                 String          @unique @default(uuid()) @db.VarChar(36)
+  purchaseInvoiceId    BigInt
+  itemId               BigInt
+  enteredQuantity      Decimal         @db.Decimal(19, 6)
+  enteredUnitName      String          @db.VarChar(50)
+  conversionFactorSnap Decimal         @db.Decimal(19, 8)
+  baseQuantity         Decimal         @db.Decimal(19, 6)
+  baseUnitName         String          @default("KG") @db.VarChar(20)
+  ratePerEnteredUnit   Decimal         @db.Decimal(19, 4)
+  grossAmount          Decimal         @db.Decimal(19, 4)
+  discountAmount       Decimal         @default(0.0000) @db.Decimal(19, 4)
+  freightAllocated     Decimal         @default(0.0000) @db.Decimal(19, 4)
+  loadingAllocated     Decimal         @default(0.0000) @db.Decimal(19, 4)
+  netLandedAmount      Decimal         @db.Decimal(19, 4)
+  batchNumber          String          @db.VarChar(50)
+
+  purchaseInvoice      PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+  item                 Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseInvoiceId])
+  @@index([itemId])
+  @@map("purchase_invoice_items")
+}
+
+model PurchaseReturn {
+  id                BigInt               @id @default(autoincrement())
+  uuid              String               @unique @default(uuid()) @db.VarChar(36)
+  returnNumber      String               @unique @db.VarChar(50)
+  purchaseInvoiceId BigInt
+  supplierId        BigInt
+  returnDate        DateTime             @db.Date
+  totalAmount       Decimal              @db.Decimal(19, 4)
+  reason            String?              @db.Text
+  createdAt         DateTime             @default(now())
+
+  purchaseInvoice   PurchaseInvoice      @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+  supplier          Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items             PurchaseReturnItem[]
+
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id                   BigInt         @id @default(autoincrement())
+  uuid                 String         @unique @default(uuid()) @db.VarChar(36)
+  purchaseReturnId     BigInt
+  batchId              BigInt
+  baseQuantity         Decimal        @db.Decimal(19, 6)
+  unitCost             Decimal        @db.Decimal(19, 4)
+  totalCost            Decimal        @db.Decimal(19, 4)
+
+  purchaseReturn       PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_return_items")
+}
+
+// ----------------------------------------------------
+// 7. COMMISSION & CONSIGNMENT
+// ----------------------------------------------------
+
+model CommissionAgreement {
+  id                   BigInt    @id @default(autoincrement())
+  uuid                 String    @unique @default(uuid()) @db.VarChar(36)
+  supplierId           BigInt
+  itemId               BigInt?
+  commissionPercentage Decimal   @db.Decimal(9, 6)
+  effectiveStartDate   DateTime  @db.Date
+  effectiveEndDate     DateTime? @db.Date
+  isActive             Boolean   @default(true)
+  notes                String?   @db.Text
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  supplier             Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  item                 Item?     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([supplierId, itemId, isActive])
+  @@map("commission_agreements")
+}
+
+model ConsignmentReceipt {
+  id            BigInt                   @id @default(autoincrement())
+  uuid          String                   @unique @default(uuid()) @db.VarChar(36)
+  receiptNumber String                   @unique @db.VarChar(50)
+  supplierId    BigInt
+  receiptDate   DateTime                 @db.Date
+  vehicleNumber String?                  @db.VarChar(50)
+  driverPhone   String?                  @db.VarChar(30)
+  notes         String?                  @db.Text
+  createdAt     DateTime                 @default(now())
+
+  supplier      Supplier                 @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items         ConsignmentReceiptItem[]
+
+  @@index([supplierId])
+  @@map("consignment_receipts")
+}
+
+model ConsignmentReceiptItem {
+  id                   BigInt             @id @default(autoincrement())
+  uuid                 String             @unique @default(uuid()) @db.VarChar(36)
+  consignmentReceiptId BigInt
+  itemId               BigInt
+  enteredQuantity      Decimal            @db.Decimal(19, 6)
+  enteredUnitName      String             @db.VarChar(50)
+  conversionFactorSnap Decimal            @db.Decimal(19, 8)
+  baseQuantity         Decimal            @db.Decimal(19, 6)
+  baseUnitName         String             @default("KG") @db.VarChar(20)
+  referenceRate        Decimal?           @db.Decimal(19, 4)
+  batchNumber          String             @db.VarChar(50)
+  notes                String?            @db.Text
+
+  consignmentReceipt   ConsignmentReceipt @relation(fields: [consignmentReceiptId], references: [id], onDelete: Restrict)
+  item                 Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([consignmentReceiptId])
+  @@index([itemId])
+  @@map("consignment_receipt_items")
+}
+
+model ConsignmentReturn {
+  id           BigInt                  @id @default(autoincrement())
+  uuid         String                  @unique @default(uuid()) @db.VarChar(36)
+  returnNumber String                  @unique @db.VarChar(50)
+  supplierId   BigInt
+  returnDate   DateTime                @db.Date
+  reason       String?                 @db.Text
+  createdAt    DateTime                @default(now())
+
+  supplier     Supplier                @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items        ConsignmentReturnItem[]
+
+  @@map("consignment_returns")
+}
+
+model ConsignmentReturnItem {
+  id                  BigInt            @id @default(autoincrement())
+  uuid                String            @unique @default(uuid()) @db.VarChar(36)
+  consignmentReturnId BigInt
+  batchId             BigInt
+  baseQuantity        Decimal           @db.Decimal(19, 6)
+
+  consignmentReturn   ConsignmentReturn @relation(fields: [consignmentReturnId], references: [id], onDelete: Cascade)
+
+  @@map("consignment_return_items")
+}
+
+model SupplierAdvance {
+  id              BigInt                      @id @default(autoincrement())
+  uuid            String                      @unique @default(uuid()) @db.VarChar(36)
+  advanceNumber   String                      @unique @db.VarChar(50)
+  supplierId      BigInt
+  advanceDate     DateTime                    @db.Date
+  amount          Decimal                     @db.Decimal(19, 4)
+  allocatedAmount Decimal                     @default(0.0000) @db.Decimal(19, 4)
+  remainingAmount Decimal                     @db.Decimal(19, 4)
+  notes           String?                     @db.Text
+  createdAt       DateTime                    @default(now())
+
+  supplier        Supplier                    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  allocations     SupplierAdvanceAllocation[]
+
+  @@index([supplierId])
+  @@map("supplier_advances")
+}
+
+model SupplierAdvanceAllocation {
+  id                   BigInt              @id @default(autoincrement())
+  uuid                 String              @unique @default(uuid()) @db.VarChar(36)
+  supplierAdvanceId    BigInt
+  supplierSettlementId BigInt
+  allocatedAmount      Decimal             @db.Decimal(19, 4)
+  createdAt            DateTime            @default(now())
+
+  supplierAdvance      SupplierAdvance     @relation(fields: [supplierAdvanceId], references: [id], onDelete: Restrict)
+  supplierSettlement   SupplierSettlement  @relation(fields: [supplierSettlementId], references: [id], onDelete: Restrict)
+
+  @@map("supplier_advance_allocations")
+}
+
+model SupplierSettlement {
+  id                      BigInt                      @id @default(autoincrement())
+  uuid                    String                      @unique @default(uuid()) @db.VarChar(36)
+  settlementNumber        String                      @unique @db.VarChar(50)
+  supplierId              BigInt
+  settlementDate          DateTime                    @db.Date
+  grossPayableAmount      Decimal                     @db.Decimal(19, 4)
+  advanceDeductionAmount  Decimal                     @default(0.0000) @db.Decimal(19, 4)
+  netPaidAmount           Decimal                     @db.Decimal(19, 4)
+  paymentMethod           PaymentMethod
+  referenceNumber         String?                     @db.VarChar(50)
+  notes                   String?                     @db.Text
+  createdAt               DateTime                    @default(now())
+
+  supplier                Supplier                    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  advanceAllocations      SupplierAdvanceAllocation[]
+
+  @@index([supplierId])
+  @@map("supplier_settlements")
+}
+
+// ----------------------------------------------------
+// 8. COMMON SALE MODULE
+// ----------------------------------------------------
+
+model SalesInvoice {
+  id               BigInt             @id @default(autoincrement())
+  uuid             String             @unique @default(uuid()) @db.VarChar(36)
+  invoiceNumber    String             @unique @db.VarChar(50)
+  customerId       BigInt
+  invoiceDate      DateTime           @db.Date
+  paymentMethod    PaymentMethod
+  grossAmount      Decimal            @db.Decimal(19, 4)
+  discountAmount   Decimal            @default(0.0000) @db.Decimal(19, 4)
+  taxAmount        Decimal            @default(0.0000) @db.Decimal(19, 4)
+  netInvoiceAmount Decimal            @db.Decimal(19, 4)
+  paidAmount       Decimal            @default(0.0000) @db.Decimal(19, 4)
+  remainingBalance Decimal            @default(0.0000) @db.Decimal(19, 4)
+  notes            String?            @db.Text
+  createdAt        DateTime           @default(now())
+
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items            SalesInvoiceItem[]
+  salesReturns     SalesReturn[]
+
+  @@index([customerId])
+  @@index([invoiceDate])
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceItem {
+  id                   BigInt             @id @default(autoincrement())
+  uuid                 String             @unique @default(uuid()) @db.VarChar(36)
+  salesInvoiceId       BigInt
+  itemId               BigInt
+  ownershipType        StockOwnershipType
+  supplierId           BigInt?
+  enteredQuantity      Decimal            @db.Decimal(19, 6)
+  enteredUnitName      String             @db.VarChar(50)
+  conversionFactorSnap Decimal            @db.Decimal(19, 8)
+  baseQuantity         Decimal            @db.Decimal(19, 6)
+  baseUnitName         String             @default("KG") @db.VarChar(20)
+  ratePerEnteredUnit   Decimal            @db.Decimal(19, 4)
+  grossAmount          Decimal            @db.Decimal(19, 4)
+  discountAmount       Decimal            @default(0.0000) @db.Decimal(19, 4)
+  netAmount            Decimal            @db.Decimal(19, 4)
+  
+  // Snapshotted commission fields
+  commissionPercentage Decimal            @default(0.000000) @db.Decimal(9, 6)
+  commissionAmount     Decimal            @default(0.0000) @db.Decimal(19, 4)
+  supplierPayable      Decimal            @default(0.0000) @db.Decimal(19, 4)
+  cogsAmount           Decimal            @default(0.0000) @db.Decimal(19, 4) // Own stock FIFO COGS
+
+  salesInvoice         SalesInvoice       @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  item                 Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  stockAllocations     StockAllocation[]
+
+  @@index([salesInvoiceId])
+  @@index([itemId])
+  @@index([supplierId])
+  @@map("sales_invoice_items")
+}
+
+model SalesReturn {
+  id             BigInt            @id @default(autoincrement())
+  uuid           String            @unique @default(uuid()) @db.VarChar(36)
+  returnNumber   String            @unique @db.VarChar(50)
+  salesInvoiceId BigInt
+  customerId     BigInt
+  returnDate     DateTime          @db.Date
+  totalAmount    Decimal           @db.Decimal(19, 4)
+  reason         String?           @db.Text
+  createdAt      DateTime          @default(now())
+
+  salesInvoice   SalesInvoice      @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items          SalesReturnItem[]
+
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id                 BigInt          @id @default(autoincrement())
+  uuid               String          @unique @default(uuid()) @db.VarChar(36)
+  salesReturnId      BigInt
+  salesInvoiceItemId BigInt
+  baseQuantity       Decimal         @db.Decimal(19, 6)
+  rate               Decimal         @db.Decimal(19, 4)
+  grossAmount        Decimal         @db.Decimal(19, 4)
+  commissionReversed Decimal         @default(0.0000) @db.Decimal(19, 4)
+  supplierPayableAdj Decimal         @default(0.0000) @db.Decimal(19, 4)
+  isSaleable         Boolean         @default(true)
+
+  salesReturn        SalesReturn     @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+
+  @@map("sales_return_items")
+}
+
+// ----------------------------------------------------
+// 9. COMPLETE DOUBLE-ENTRY ACCOUNTING
+// ----------------------------------------------------
+
+model ChartOfAccounts {
+  id          BigInt             @id @default(autoincrement())
+  uuid        String             @unique @default(uuid()) @db.VarChar(36)
+  accountCode String             @unique @db.VarChar(30)
+  accountName String             @db.VarChar(100)
+  category    AccountCategory
+  parentId    BigInt?
+  isSystem    Boolean            @default(false)
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+
+  parent      ChartOfAccounts?   @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children    ChartOfAccounts[]  @relation("AccountHierarchy")
+  journalLines JournalEntryLine[]
+
+  @@index([accountCode])
+  @@index([category])
+  @@map("chart_of_accounts")
+}
+
+model JournalEntry {
+  id              BigInt             @id @default(autoincrement())
+  uuid            String             @unique @default(uuid()) @db.VarChar(36)
+  entryNumber     String             @unique @db.VarChar(50)
+  entryDate       DateTime           @db.Date
+  referenceType   DocumentReferenceType
+  referenceId     BigInt
+  referenceNumber String             @db.VarChar(50)
+  narration       String             @db.Text
+  totalDebit      Decimal            @db.Decimal(19, 4)
+  totalCredit     Decimal            @db.Decimal(19, 4)
+  isReversed      Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+
+  lines           JournalEntryLine[]
+
+  @@index([referenceType, referenceId])
+  @@index([entryDate])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id             BigInt          @id @default(autoincrement())
+  uuid           String          @unique @default(uuid()) @db.VarChar(36)
+  journalEntryId BigInt
+  accountId      BigInt
+  debit          Decimal         @default(0.0000) @db.Decimal(19, 4)
+  credit         Decimal         @default(0.0000) @db.Decimal(19, 4)
+  partyType      String?         @db.VarChar(20) // CUSTOMER or SUPPLIER
+  partyId        BigInt?
+  description    String?         @db.VarChar(255)
+
+  journalEntry   JournalEntry    @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  account        ChartOfAccounts @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([partyType, partyId])
+  @@map("journal_entry_lines")
+}
+
+// ----------------------------------------------------
+// 7b. COMMISSION EXPENSES (kharche jo commission se kate jayenge)
+// ----------------------------------------------------
+
+model CommissionExpense {
+  id          BigInt   @id @default(autoincrement())
+  uuid        String   @unique @default(uuid()) @db.VarChar(36)
+  expenseDate DateTime @db.Date
+  description String   @db.VarChar(255)
+  amount      Decimal  @db.Decimal(19, 4)
+  category    String   @default("GENERAL") @db.VarChar(50)
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([expenseDate])
+  @@map("commission_expenses")
+}
+
+// ----------------------------------------------------
+// 10. CASH & BANK
+// ----------------------------------------------------
+
+model CashBankAccount {
+  id              BigInt           @id @default(autoincrement())
+  uuid            String           @unique @default(uuid()) @db.VarChar(36)
+  accountName     String           @db.VarChar(100)
+  accountType     String           @db.VarChar(20) // CASH or BANK
+  bankName        String?          @db.VarChar(100)
+  accountNumber   String?          @db.VarChar(50)
+  glAccountId     BigInt
+  currentBalance  Decimal          @default(0.0000) @db.Decimal(19, 4)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+
+  receiptVouchers ReceiptVoucher[]
+  paymentVouchers PaymentVoucher[]
+
+  @@map("cash_bank_accounts")
+}
+
+model ReceiptVoucher {
+  id                BigInt          @id @default(autoincrement())
+  uuid              String          @unique @default(uuid()) @db.VarChar(36)
+  voucherNumber     String          @unique @db.VarChar(50)
+  voucherDate       DateTime        @db.Date
+  cashBankAccountId BigInt
+  amount            Decimal         @db.Decimal(19, 4)
+  partyType         String?         @db.VarChar(20)
+  partyId           BigInt?
+  creditAccountId   BigInt
+  referenceNumber   String?         @db.VarChar(50)
+  narration         String          @db.Text
+  createdAt         DateTime        @default(now())
+
+  cashBankAccount   CashBankAccount @relation(fields: [cashBankAccountId], references: [id], onDelete: Restrict)
+
+  @@map("receipt_vouchers")
+}
+
+model PaymentVoucher {
+  id                BigInt          @id @default(autoincrement())
+  uuid              String          @unique @default(uuid()) @db.VarChar(36)
+  voucherNumber     String          @unique @db.VarChar(50)
+  voucherDate       DateTime        @db.Date
+  cashBankAccountId BigInt
+  amount            Decimal         @db.Decimal(19, 4)
+  partyType         String?         @db.VarChar(20)
+  partyId           BigInt?
+  debitAccountId    BigInt
+  referenceNumber   String?         @db.VarChar(50)
+  narration         String          @db.Text
+  createdAt         DateTime        @default(now())
+
+  cashBankAccount   CashBankAccount @relation(fields: [cashBankAccountId], references: [id], onDelete: Restrict)
+
+  @@map("payment_vouchers")
+}
+
+// ----------------------------------------------------
+// 11. SYNCHRONIZATION & AUDIT TRAIL
+// ----------------------------------------------------
+
+model SyncOutbox {
+  id            BigInt     @id @default(autoincrement())
+  uuid          String     @unique @default(uuid()) @db.VarChar(36)
+  aggregateType String     @db.VarChar(50)
+  aggregateId   BigInt
+  eventType     String     @db.VarChar(50)
+  payloadJson   String     @db.LongText
+  status        SyncStatus @default(PENDING)
+  retryCount    Int        @default(0)
+  lastError     String?    @db.Text
+  createdAt     DateTime   @default(now())
+  syncedAt      DateTime?
+
+  @@index([status, id])
+  @@map("sync_outbox")
+}
+
+model SyncInbox {
+  id            BigInt     @id @default(autoincrement())
+  uuid          String     @unique @db.VarChar(36) // Remote event uuid
+  aggregateType String     @db.VarChar(50)
+  aggregateId   BigInt
+  eventType     String     @db.VarChar(50)
+  payloadJson   String     @db.LongText
+  processedAt   DateTime   @default(now())
+
+  @@map("sync_inbox")
+}
+
+model SyncLog {
+  id             BigInt   @id @default(autoincrement())
+  batchSize      Int
+  status         String   @db.VarChar(20)
+  responseCode   Int?
+  latencyMs      Int?
+  details        String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  @@map("sync_logs")
+}
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  uuid        String   @unique @default(uuid()) @db.VarChar(36)
+  action      String   @db.VarChar(50)
+  tableName   String   @db.VarChar(50)
+  recordId    BigInt?
+  deviceId    String?  @db.VarChar(50)
+  diffJson    String?  @db.LongText
+  performedAt DateTime @default(now())
+
+  @@index([tableName, recordId])
+  @@index([performedAt])
+  @@map("audit_logs")
+}

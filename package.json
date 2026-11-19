@@ -1,0 +1,26 @@
+{
+  "name": "wholesale-ghalla-mandi-erp",
+  "version": "1.0.0",
+  "description": "Professional Wholesale / Ghalla Mandi Inventory, Commission & Accounting Desktop ERP",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "server": "npm run dev --workspace=@erp/server",
+    "desktop": "npm run dev --workspace=@erp/desktop",
+    "dev": "concurrently -k \"npm run dev --workspace=@erp/server\" \"npm run dev --workspace=@erp/desktop\"",
+    "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
+    "prisma:seed": "tsx ./prisma/seed.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prisma": "^5.15.0",
+    "tsx": "^4.15.4",
+    "typescript": "^5.4.5"
+  }
+}
