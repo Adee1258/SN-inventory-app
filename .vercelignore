@@ -1,0 +1,7 @@
+apps/server/src
+apps/server/dist
+apps/desktop
+packages
+prisma
+scripts
+docs
