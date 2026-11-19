@@ -1,6 +1,9 @@
 // API Client for Wholesale ERP Local / Cloud Node Server
 
-const BASE_URL = (import.meta.env.VITE_API_URL as string) || 'http://localhost:4000/api/v1';
+const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const BASE_URL =
+  (import.meta.env.VITE_API_URL as string) ||
+  (isLocalHost ? 'http://localhost:4000/api/v1' : '/api/v1');
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public issues?: unknown[]) {

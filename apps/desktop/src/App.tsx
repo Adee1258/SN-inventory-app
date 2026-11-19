@@ -24,7 +24,9 @@ export function App() {
 
   const checkHealth = async () => {
     try {
-      const res = await fetch('http://localhost:4000/health');
+      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const healthUrl = isLocalHost ? 'http://localhost:4000/health' : '/health';
+      const res = await fetch(healthUrl);
       const data = await res.json();
       setIsDbConnected(Boolean(data.databaseConnected));
     } catch {

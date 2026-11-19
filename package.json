@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
+    "vercel-build": "npm run build",
+    "postinstall": "prisma generate --schema=./prisma/schema.prisma",
     "test": "npm run test --workspaces",
     "server": "npm run dev --workspace=@erp/server",
     "desktop": "npm run dev --workspace=@erp/desktop",

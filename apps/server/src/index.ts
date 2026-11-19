@@ -63,8 +63,8 @@ app.use('/api/v1/settings', settingsRoutes);
 // Centralized Error Handler
 app.use(errorHandler);
 
-// Start Server
-if (process.env.NODE_ENV !== 'test') {
+// Start Server (only when not running inside Vercel serverless environment)
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(ENV.PORT, ENV.API_HOST, async () => {
     console.log(`=======================================================`);
     console.log(` Wholesale / Ghalla Mandi ERP Local API Server Started`);
