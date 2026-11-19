@@ -5,7 +5,6 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc -b",
-    "vercel-build": "prisma generate --schema=../../prisma/schema.prisma",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "clean": "rimraf dist"
