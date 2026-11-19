@@ -43023,7 +43023,8 @@ function startSyncWorker(intervalMs = 15e3) {
 
 // apps/server/src/index.ts
 var app = (0, import_express13.default)();
-app.use(helmet({ contentSecurityPolicy: false }));
+var helmet3 = helmet.default || helmet;
+app.use(helmet3({ contentSecurityPolicy: false }));
 app.use((0, import_cors.default)({ origin: "*" }));
 app.use(import_express13.default.json({ limit: "10mb" }));
 app.use(import_express13.default.urlencoded({ extended: true }));

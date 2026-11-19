@@ -1,7 +1,7 @@
 import 'express-async-errors';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
+import helmetPkg from 'helmet';
 import morgan from 'morgan';
 import { ENV } from './config/env.js';
 import { checkDatabaseConnection } from './database/prisma.js';
@@ -23,6 +23,7 @@ import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { startSyncWorker } from './sync/sync-worker.js';
 
 const app = express();
+const helmet = (helmetPkg as any).default || helmetPkg;
 
 // Security & Parsing Middleware
 app.use(helmet({ contentSecurityPolicy: false })); // Electron renderer interacts locally
