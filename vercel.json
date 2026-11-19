@@ -5,6 +5,6 @@
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "/api/index.js" },
     { "source": "/health",        "destination": "/api/index.js" },
-    { "source": "/((?!assets/|favicon\\.ico|api/).*)", "destination": "/index.html" }
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }

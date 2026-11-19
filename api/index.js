@@ -12,19 +12,27 @@ module.exports = async (req, res) => {
 
   try {
     if (!cachedApp) {
-      console.log('[Vercel] Loading bundle...');
-      // Use require() since bundle.js is CommonJS (esbuild format: cjs)
-      const serverModule = require('../apps/server/dist/bundle.js');
+      console.log('[Vercel] Loading server bundle...');
+      let serverModule;
+      try {
+        serverModule = require('./_bundle.js');
+      } catch (_e) {
+        serverModule = require('../apps/server/dist/bundle.js');
+      }
+
       cachedApp = serverModule.app || serverModule.default;
-      if (!cachedApp) throw new Error('No app export. Keys: ' + Object.keys(serverModule).join(', '));
-      console.log('[Vercel] Bundle loaded OK');
+      if (!cachedApp) {
+        throw new Error('No app export found. Keys: ' + Object.keys(serverModule || {}).join(', '));
+      }
+      console.log('[Vercel] Server bundle loaded successfully');
     }
     return cachedApp(req, res);
   } catch (err) {
-    console.error('[Vercel] ERROR:', err?.message);
-    console.error('[Vercel] STACK:', err?.stack);
+    console.error('[Vercel] Function Error:', err?.message);
+    console.error('[Vercel] Stack:', err?.stack);
     return res.status(500).json({
-      error: err?.message,
+      error: 'Backend initialization failed',
+      message: err?.message,
       type: err?.constructor?.name,
     });
   }
