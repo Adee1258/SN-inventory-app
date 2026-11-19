@@ -43064,7 +43064,8 @@ app.use("/api/v1/vouchers", voucherRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/settings", settingsRoutes);
 app.use(errorHandler);
-if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
+var isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+if (process.env.NODE_ENV !== "test" && !isServerless) {
   app.listen(ENV.PORT, ENV.API_HOST, async () => {
     console.log(`=======================================================`);
     console.log(` Wholesale / Ghalla Mandi ERP Local API Server Started`);
