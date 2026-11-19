@@ -7,7 +7,9 @@
       "config": {
         "includeFiles": [
           "../../prisma/schema.prisma",
-          "../../packages/**"
+          "../../packages/shared-types/src/**",
+          "../../packages/business-rules/src/**",
+          "../../packages/validation/src/**"
         ]
       }
     }
