@@ -15,6 +15,7 @@ import { LedgerPage } from './pages/LedgerPage.js';
 import { EmployeesPage } from './pages/EmployeesPage.js';
 import { ReportsPage } from './pages/ReportsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
+import { getApiBaseUrl } from './api/client.js';
 
 export function App() {
   const [activeModule, setActiveModule] = useState<NavModule>('dashboard');
@@ -24,11 +25,12 @@ export function App() {
 
   const checkHealth = async () => {
     try {
-      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const healthUrl = isLocalHost ? 'http://localhost:4000/health' : '/health';
+      const baseUrl = getApiBaseUrl();
+      const rootUrl = baseUrl.replace(/\/api\/v1\/?$/, '');
+      const healthUrl = `${rootUrl}/health`;
       const res = await fetch(healthUrl);
       const data = await res.json();
-      setIsDbConnected(Boolean(data.databaseConnected));
+      setIsDbConnected(Boolean(data.databaseConnected || data.status === 'OK'));
     } catch {
       setIsDbConnected(false);
     }

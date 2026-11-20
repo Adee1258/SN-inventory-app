@@ -1,9 +1,22 @@
 // API Client for Wholesale ERP Local / Cloud Node Server
 
-const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const BASE_URL =
-  (import.meta.env.VITE_API_URL as string) ||
-  (isLocalHost ? 'http://localhost:4000/api/v1' : '/api/v1');
+export const CLOUD_API_URL = 'https://sn-inventory-app-sh3v.vercel.app/api/v1';
+export const LOCAL_API_URL = 'http://localhost:4000/api/v1';
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('erp_api_url');
+    if (saved && saved.trim()) return saved.trim();
+  }
+  return (import.meta.env.VITE_API_URL as string) || CLOUD_API_URL;
+}
+
+export function setApiBaseUrl(url: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('erp_api_url', url.trim());
+    window.dispatchEvent(new CustomEvent('erp_api_url_changed', { detail: url.trim() }));
+  }
+}
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public issues?: unknown[]) {
@@ -23,7 +36,8 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint}`;
+  const baseUrl = getApiBaseUrl();
+  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
 
   try {
     const res = await fetch(url, { ...options, headers });
@@ -47,7 +61,7 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
     const msg = err instanceof Error ? err.message : 'Network request failed';
-    throw new ApiError('NETWORK_ERROR', `Local server connection error: ${msg}`);
+    throw new ApiError('NETWORK_ERROR', `Server connection error (${baseUrl}): ${msg}`);
   }
 }
 

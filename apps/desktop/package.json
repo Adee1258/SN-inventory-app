@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:electron": "vite build && tsc -p tsconfig.electron.json && electron-builder",
+    "build:electron": "npm run build && node ../../scripts/build-electron.mjs && electron-builder",
     "preview": "vite preview",
     "clean": "rimraf dist dist-electron release"
   },

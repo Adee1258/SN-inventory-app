@@ -1,9 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -16,7 +12,7 @@ function createWindow() {
     backgroundColor: '#0f172a',
     title: 'Wholesale / Ghalla Mandi ERP - Windows Desktop Edition',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, 'preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
