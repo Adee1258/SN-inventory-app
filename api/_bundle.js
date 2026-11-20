@@ -29777,8 +29777,8 @@ Object.defineProperty(Layer.prototype, "handle", {
 patchRouterParam();
 
 // apps/server/src/index.ts
-var import_express13 = __toESM(require_express2(), 1);
-var import_cors = __toESM(require_lib3(), 1);
+var import_express13 = __toESM(require_express2());
+var import_cors = __toESM(require_lib3());
 
 // node_modules/helmet/index.mjs
 var dangerouslyDisableDefaultSrc = /* @__PURE__ */ Symbol("dangerouslyDisableDefaultSrc");
@@ -30329,11 +30329,11 @@ var helmet = Object.assign(
 );
 
 // apps/server/src/index.ts
-var import_morgan = __toESM(require_morgan(), 1);
+var import_morgan = __toESM(require_morgan());
 
 // apps/server/src/config/env.ts
-var import_dotenv = __toESM(require_main(), 1);
-var import_node_path = __toESM(require("node:path"), 1);
+var import_dotenv = __toESM(require_main());
+var import_node_path = __toESM(require("node:path"));
 import_dotenv.default.config({ path: import_node_path.default.resolve(process.cwd(), ".env") });
 import_dotenv.default.config();
 var ENV = {
@@ -34460,9 +34460,9 @@ function errorHandler(err, _req, res, _next) {
 }
 
 // apps/server/src/modules/auth/auth.routes.ts
-var import_express = __toESM(require_express2(), 1);
-var import_node_crypto = __toESM(require("node:crypto"), 1);
-var import_jsonwebtoken2 = __toESM(require_jsonwebtoken(), 1);
+var import_express = __toESM(require_express2());
+var import_node_crypto = __toESM(require("node:crypto"));
+var import_jsonwebtoken2 = __toESM(require_jsonwebtoken());
 
 // packages/validation/src/index.ts
 var decimalStringRegex = /^-?\d+(\.\d+)?$/;
@@ -34690,7 +34690,7 @@ var CommissionExpenseSchema = external_exports.object({
 });
 
 // apps/server/src/middleware/auth.ts
-var import_jsonwebtoken = __toESM(require_jsonwebtoken(), 1);
+var import_jsonwebtoken = __toESM(require_jsonwebtoken());
 var isLocalhostRequest = (req) => {
   const ip = req.ip || req.socket.remoteAddress || "";
   const host = req.hostname || req.headers.host || "";
@@ -34921,7 +34921,7 @@ router.post("/change-credentials", async (req, res) => {
 var authRoutes = router;
 
 // apps/server/src/modules/items/items.routes.ts
-var import_express2 = __toESM(require_express2(), 1);
+var import_express2 = __toESM(require_express2());
 
 // node_modules/decimal.js/decimal.mjs
 var EXP_LIMIT = 9e15;
@@ -37628,7 +37628,7 @@ router2.delete("/:id", requireOwnerAuth, async (req, res) => {
 var itemRoutes = router2;
 
 // apps/server/src/modules/parties/parties.routes.ts
-var import_express3 = __toESM(require_express2(), 1);
+var import_express3 = __toESM(require_express2());
 
 // apps/server/src/accounting/posting-engine.ts
 async function createBalancedJournalEntry(params) {
@@ -38392,7 +38392,7 @@ router3.post("/recalculate", requireOwnerAuth, async (_req, res) => {
 var partyRoutes = router3;
 
 // apps/server/src/modules/opening-stock/opening-stock.routes.ts
-var import_express4 = __toESM(require_express2(), 1);
+var import_express4 = __toESM(require_express2());
 var router4 = (0, import_express4.Router)();
 router4.get("/", async (_req, res) => {
   const entries = await prisma.openingStockEntry.findMany({
@@ -38798,7 +38798,7 @@ router4.delete("/:id", requireOwnerAuth, async (req, res) => {
 var openingStockRoutes = router4;
 
 // apps/server/src/modules/inventory/inventory.routes.ts
-var import_express5 = __toESM(require_express2(), 1);
+var import_express5 = __toESM(require_express2());
 var router5 = (0, import_express5.Router)();
 router5.get("/batches", async (req, res) => {
   const { itemId, ownershipType, supplierId, status } = req.query;
@@ -38961,7 +38961,7 @@ router5.get("/movements", async (req, res) => {
 var inventoryRoutes = router5;
 
 // apps/server/src/modules/purchases/purchases.routes.ts
-var import_express6 = __toESM(require_express2(), 1);
+var import_express6 = __toESM(require_express2());
 var router6 = (0, import_express6.Router)();
 router6.get("/", async (_req, res) => {
   const purchases = await prisma.purchaseInvoice.findMany({
@@ -39443,7 +39443,7 @@ router6.delete("/:id", requireOwnerAuth, async (req, res) => {
 var purchaseRoutes = router6;
 
 // apps/server/src/modules/commission/commission.routes.ts
-var import_express7 = __toESM(require_express2(), 1);
+var import_express7 = __toESM(require_express2());
 var router7 = (0, import_express7.Router)();
 router7.get("/agreements", async (req, res) => {
   const { supplierId } = req.query;
@@ -40615,7 +40615,7 @@ router7.get("/final-summary", async (_req, res) => {
 var commissionRoutes = router7;
 
 // apps/server/src/modules/sales/sales.routes.ts
-var import_express8 = __toESM(require_express2(), 1);
+var import_express8 = __toESM(require_express2());
 var router8 = (0, import_express8.Router)();
 router8.get("/", async (_req, res) => {
   const sales = await prisma.salesInvoice.findMany({
@@ -41323,7 +41323,7 @@ router8.delete("/:id", requireDeviceOrOwnerAuth, async (req, res) => {
 var saleRoutes = router8;
 
 // apps/server/src/modules/accounting/accounting.routes.ts
-var import_express9 = __toESM(require_express2(), 1);
+var import_express9 = __toESM(require_express2());
 var import_client2 = require("@prisma/client");
 var router9 = (0, import_express9.Router)();
 var OWN_STREAM_REF_TYPES = [
@@ -42271,7 +42271,7 @@ router9.post("/year-end-closing", async (req, res) => {
 var accountingRoutes = router9;
 
 // apps/server/src/modules/vouchers/vouchers.routes.ts
-var import_express10 = __toESM(require_express2(), 1);
+var import_express10 = __toESM(require_express2());
 var router10 = (0, import_express10.Router)();
 router10.get("/accounts", async (_req, res) => {
   const accounts = await prisma.cashBankAccount.findMany({
@@ -42711,7 +42711,7 @@ router10.delete("/payments/:id", requireOwnerAuth, async (req, res) => {
 var voucherRoutes = router10;
 
 // apps/server/src/modules/dashboard/dashboard.routes.ts
-var import_express11 = __toESM(require_express2(), 1);
+var import_express11 = __toESM(require_express2());
 var router11 = (0, import_express11.Router)();
 router11.get("/metrics", async (_req, res) => {
   const isDbConnected = await checkDatabaseConnection();
@@ -42841,7 +42841,7 @@ router11.get("/metrics", async (_req, res) => {
 var dashboardRoutes = router11;
 
 // apps/server/src/modules/settings/settings.routes.ts
-var import_express12 = __toESM(require_express2(), 1);
+var import_express12 = __toESM(require_express2());
 var router12 = (0, import_express12.Router)();
 var SETTINGS_DEFAULTS = {
   business_name: "SN Inventory ERP",
