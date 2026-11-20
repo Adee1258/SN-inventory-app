@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "prisma generate --schema=./prisma/schema.prisma && node scripts/build-server.mjs",
+  "buildCommand": "prisma generate --schema=./prisma/schema.prisma",
   "builds": [
     {
       "src": "api/index.js",
