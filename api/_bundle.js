@@ -37380,7 +37380,6 @@ router2.get("/categories", async (_req, res) => {
   return res.json({ success: true, data: categories });
 });
 router2.get("/", async (_req, res) => {
-  await cleanupOrphanItems();
   const items = await prisma.item.findMany({
     where: { isActive: true },
     include: {
@@ -38397,41 +38396,43 @@ router4.get("/", async (_req, res) => {
     },
     orderBy: { entryDate: "desc" }
   });
-  const enrichedEntries = await Promise.all(
-    entries.map(async (entry) => {
-      const itemsWithBatch = await Promise.all(
-        entry.items.map(async (it) => {
-          const batch = await prisma.stockBatch.findFirst({
-            where: {
-              sourceType: "OPENING",
-              sourceDocumentId: entry.id,
-              itemId: it.itemId,
-              batchNumber: it.batchNumber
-            },
-            select: {
-              remainingBaseQty: true,
-              initialBaseQty: true,
-              status: true
-            }
-          });
-          const remainingBaseQty = batch ? batch.remainingBaseQty.toString() : it.enteredQuantity.toString();
-          const initialQty = parseFloat(it.enteredQuantity.toString()) || 0;
-          const remQty = parseFloat(remainingBaseQty) || 0;
-          const soldQty = Math.max(0, initialQty - remQty);
-          return {
-            ...it,
-            remainingQuantity: remQty.toFixed(2),
-            soldQuantity: soldQty.toFixed(2),
-            batchStatus: batch?.status ?? (remQty <= 0 ? "EXHAUSTED" : "ACTIVE")
-          };
-        })
-      );
+  const entryIds = entries.map((e) => e.id);
+  const batches = entryIds.length > 0 ? await prisma.stockBatch.findMany({
+    where: {
+      sourceType: "OPENING",
+      sourceDocumentId: { in: entryIds }
+    },
+    select: {
+      sourceDocumentId: true,
+      itemId: true,
+      batchNumber: true,
+      remainingBaseQty: true,
+      initialBaseQty: true,
+      status: true
+    }
+  }) : [];
+  const batchMap = /* @__PURE__ */ new Map();
+  for (const b of batches) {
+    if (b.sourceDocumentId) {
+      batchMap.set(`${b.sourceDocumentId}-${b.itemId}-${b.batchNumber}`, b);
+    }
+  }
+  const enrichedEntries = entries.map((entry) => ({
+    ...entry,
+    items: entry.items.map((it) => {
+      const batch = batchMap.get(`${entry.id}-${it.itemId}-${it.batchNumber}`);
+      const remainingBaseQty = batch ? batch.remainingBaseQty.toString() : it.enteredQuantity.toString();
+      const initialQty = parseFloat(it.enteredQuantity.toString()) || 0;
+      const remQty = parseFloat(remainingBaseQty) || 0;
+      const soldQty = Math.max(0, initialQty - remQty);
       return {
-        ...entry,
-        items: itemsWithBatch
+        ...it,
+        remainingQuantity: remQty.toFixed(2),
+        soldQuantity: soldQty.toFixed(2),
+        batchStatus: batch?.status ?? (remQty <= 0 ? "EXHAUSTED" : "ACTIVE")
       };
     })
-  );
+  }));
   return res.json({ success: true, data: enrichedEntries });
 });
 router4.post("/", requireOwnerAuth, async (req, res) => {
@@ -38743,45 +38744,48 @@ router4.delete("/:id", requireOwnerAuth, async (req, res) => {
       where: { referenceType: "OPENING_STOCK", referenceId: entryId },
       select: { id: true }
     });
-    for (const j of journals) {
-      await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
-      await tx.journalEntry.delete({ where: { id: j.id } });
+    const journalIds = journals.map((j) => j.id);
+    if (journalIds.length > 0) {
+      await tx.journalEntryLine.deleteMany({ where: { journalEntryId: { in: journalIds } } });
+      await tx.journalEntry.deleteMany({ where: { id: { in: journalIds } } });
     }
     const supplierIds = entry.items.map((it) => it.supplierId).filter(Boolean);
     await tx.openingStockItem.deleteMany({ where: { openingStockEntryId: entryId } });
     await tx.openingStockEntry.delete({ where: { id: entryId } });
-    for (const suppId of supplierIds) {
-      const remainingPurchases = await tx.purchaseInvoice.count({
-        where: { supplierId: suppId }
-      });
-      const remainingOpenings = await tx.openingStockItem.count({
-        where: { supplierId: suppId }
-      });
-      if (remainingPurchases === 0 && remainingOpenings === 0) {
-        await tx.supplier.update({
-          where: { id: suppId },
-          data: {
-            currentBalanceOwn: new decimal_default(0),
-            openingBalanceOwn: new decimal_default(0)
-          }
-        });
-      }
-    }
-    for (const itemId of itemIds) {
-      const [batches2, movements, openings, purchases, sales, consignments, agreements] = await Promise.all([
-        tx.stockBatch.count({ where: { itemId } }),
-        tx.stockMovement.count({ where: { itemId } }),
-        tx.openingStockItem.count({ where: { itemId } }),
-        tx.purchaseInvoiceItem.count({ where: { itemId } }),
-        tx.salesInvoiceItem.count({ where: { itemId } }),
-        tx.consignmentReceiptItem.count({ where: { itemId } }),
-        tx.commissionAgreement.count({ where: { itemId } })
-      ]);
-      if (batches2 === 0 && movements === 0 && openings === 0 && purchases === 0 && sales === 0 && consignments === 0 && agreements === 0) {
-        await tx.itemUnitConversion.deleteMany({ where: { itemId } });
-        await tx.item.delete({ where: { id: itemId } });
-      }
-    }
+    await Promise.all(
+      supplierIds.map(async (suppId) => {
+        const [remainingPurchases, remainingOpenings] = await Promise.all([
+          tx.purchaseInvoice.count({ where: { supplierId: suppId } }),
+          tx.openingStockItem.count({ where: { supplierId: suppId } })
+        ]);
+        if (remainingPurchases === 0 && remainingOpenings === 0) {
+          await tx.supplier.update({
+            where: { id: suppId },
+            data: {
+              currentBalanceOwn: new decimal_default(0),
+              openingBalanceOwn: new decimal_default(0)
+            }
+          });
+        }
+      })
+    );
+    await Promise.all(
+      itemIds.map(async (itemId) => {
+        const [batches2, movements, openings, purchases, sales, consignments, agreements] = await Promise.all([
+          tx.stockBatch.count({ where: { itemId } }),
+          tx.stockMovement.count({ where: { itemId } }),
+          tx.openingStockItem.count({ where: { itemId } }),
+          tx.purchaseInvoiceItem.count({ where: { itemId } }),
+          tx.salesInvoiceItem.count({ where: { itemId } }),
+          tx.consignmentReceiptItem.count({ where: { itemId } }),
+          tx.commissionAgreement.count({ where: { itemId } })
+        ]);
+        if (batches2 === 0 && movements === 0 && openings === 0 && purchases === 0 && sales === 0 && consignments === 0 && agreements === 0) {
+          await tx.itemUnitConversion.deleteMany({ where: { itemId } });
+          await tx.item.delete({ where: { id: itemId } });
+        }
+      })
+    );
     return { message: `Opening stock entry ${entry.entryNumber} deleted, reversed, and unused items cleaned.` };
   });
   return res.json({ success: true, data: result });

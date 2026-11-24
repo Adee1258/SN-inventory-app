@@ -21,43 +21,49 @@ router.get('/', async (_req: Request, res: Response) => {
     orderBy: { entryDate: 'desc' },
   });
 
-  // Attach live batch remaining quantity and sold quantity
-  const enrichedEntries = await Promise.all(
-    entries.map(async (entry) => {
-      const itemsWithBatch = await Promise.all(
-        entry.items.map(async (it) => {
-          const batch = await prisma.stockBatch.findFirst({
-            where: {
-              sourceType: 'OPENING',
-              sourceDocumentId: entry.id,
-              itemId: it.itemId,
-              batchNumber: it.batchNumber,
-            },
-            select: {
-              remainingBaseQty: true,
-              initialBaseQty: true,
-              status: true,
-            },
-          });
-          const remainingBaseQty = batch ? batch.remainingBaseQty.toString() : it.enteredQuantity.toString();
-          const initialQty = parseFloat(it.enteredQuantity.toString()) || 0;
-          const remQty = parseFloat(remainingBaseQty) || 0;
-          const soldQty = Math.max(0, initialQty - remQty);
+  // Batch-fetch all relevant stock batches in ONE query instead of N*M individual queries
+  const entryIds = entries.map((e) => e.id);
+  const batches = entryIds.length > 0
+    ? await prisma.stockBatch.findMany({
+        where: {
+          sourceType: 'OPENING',
+          sourceDocumentId: { in: entryIds },
+        },
+        select: {
+          sourceDocumentId: true,
+          itemId: true,
+          batchNumber: true,
+          remainingBaseQty: true,
+          initialBaseQty: true,
+          status: true,
+        },
+      })
+    : [];
 
-          return {
-            ...it,
-            remainingQuantity: remQty.toFixed(2),
-            soldQuantity: soldQty.toFixed(2),
-            batchStatus: batch?.status ?? (remQty <= 0 ? 'EXHAUSTED' : 'ACTIVE'),
-          };
-        })
-      );
+  const batchMap = new Map<string, typeof batches[0]>();
+  for (const b of batches) {
+    if (b.sourceDocumentId) {
+      batchMap.set(`${b.sourceDocumentId}-${b.itemId}-${b.batchNumber}`, b);
+    }
+  }
+
+  const enrichedEntries = entries.map((entry) => ({
+    ...entry,
+    items: entry.items.map((it) => {
+      const batch = batchMap.get(`${entry.id}-${it.itemId}-${it.batchNumber}`);
+      const remainingBaseQty = batch ? batch.remainingBaseQty.toString() : it.enteredQuantity.toString();
+      const initialQty = parseFloat(it.enteredQuantity.toString()) || 0;
+      const remQty = parseFloat(remainingBaseQty) || 0;
+      const soldQty = Math.max(0, initialQty - remQty);
+
       return {
-        ...entry,
-        items: itemsWithBatch,
+        ...it,
+        remainingQuantity: remQty.toFixed(2),
+        soldQuantity: soldQty.toFixed(2),
+        batchStatus: batch?.status ?? (remQty <= 0 ? 'EXHAUSTED' : 'ACTIVE'),
       };
-    })
-  );
+    }),
+  }));
 
   return res.json({ success: true, data: enrichedEntries });
 });
@@ -441,14 +447,15 @@ router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
       }
     }
 
-    // Delete journal entries
+    // Delete journal entries in batch
     const journals = await tx.journalEntry.findMany({
       where: { referenceType: 'OPENING_STOCK', referenceId: entryId },
       select: { id: true },
     });
-    for (const j of journals) {
-      await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
-      await tx.journalEntry.delete({ where: { id: j.id } });
+    const journalIds = journals.map((j) => j.id);
+    if (journalIds.length > 0) {
+      await tx.journalEntryLine.deleteMany({ where: { journalEntryId: { in: journalIds } } });
+      await tx.journalEntry.deleteMany({ where: { id: { in: journalIds } } });
     }
 
     // Delete opening items and entry
@@ -457,50 +464,52 @@ router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
     await tx.openingStockItem.deleteMany({ where: { openingStockEntryId: entryId } });
     await tx.openingStockEntry.delete({ where: { id: entryId } });
 
-    // If any referenced supplier now has 0 purchases and 0 openings left, reset balance to 0
-    for (const suppId of supplierIds) {
-      const remainingPurchases = await tx.purchaseInvoice.count({
-        where: { supplierId: suppId },
-      });
-      const remainingOpenings = await tx.openingStockItem.count({
-        where: { supplierId: suppId },
-      });
-      if (remainingPurchases === 0 && remainingOpenings === 0) {
-        await tx.supplier.update({
-          where: { id: suppId },
-          data: {
-            currentBalanceOwn: new Decimal(0),
-            openingBalanceOwn: new Decimal(0),
-          },
-        });
-      }
-    }
+    // If any referenced supplier now has 0 purchases and 0 openings left, reset balance to 0 (parallel check)
+    await Promise.all(
+      supplierIds.map(async (suppId) => {
+        const [remainingPurchases, remainingOpenings] = await Promise.all([
+          tx.purchaseInvoice.count({ where: { supplierId: suppId } }),
+          tx.openingStockItem.count({ where: { supplierId: suppId } }),
+        ]);
+        if (remainingPurchases === 0 && remainingOpenings === 0) {
+          await tx.supplier.update({
+            where: { id: suppId },
+            data: {
+              currentBalanceOwn: new Decimal(0),
+              openingBalanceOwn: new Decimal(0),
+            },
+          });
+        }
+      })
+    );
 
-    // Clean up any items that now have 0 history and were only created for this entry
-    for (const itemId of itemIds) {
-      const [batches, movements, openings, purchases, sales, consignments, agreements] = await Promise.all([
-        tx.stockBatch.count({ where: { itemId } }),
-        tx.stockMovement.count({ where: { itemId } }),
-        tx.openingStockItem.count({ where: { itemId } }),
-        tx.purchaseInvoiceItem.count({ where: { itemId } }),
-        tx.salesInvoiceItem.count({ where: { itemId } }),
-        tx.consignmentReceiptItem.count({ where: { itemId } }),
-        tx.commissionAgreement.count({ where: { itemId } }),
-      ]);
+    // Clean up any items that now have 0 history and were only created for this entry (parallel check)
+    await Promise.all(
+      itemIds.map(async (itemId) => {
+        const [batches, movements, openings, purchases, sales, consignments, agreements] = await Promise.all([
+          tx.stockBatch.count({ where: { itemId } }),
+          tx.stockMovement.count({ where: { itemId } }),
+          tx.openingStockItem.count({ where: { itemId } }),
+          tx.purchaseInvoiceItem.count({ where: { itemId } }),
+          tx.salesInvoiceItem.count({ where: { itemId } }),
+          tx.consignmentReceiptItem.count({ where: { itemId } }),
+          tx.commissionAgreement.count({ where: { itemId } }),
+        ]);
 
-      if (
-        batches === 0 &&
-        movements === 0 &&
-        openings === 0 &&
-        purchases === 0 &&
-        sales === 0 &&
-        consignments === 0 &&
-        agreements === 0
-      ) {
-        await tx.itemUnitConversion.deleteMany({ where: { itemId } });
-        await tx.item.delete({ where: { id: itemId } });
-      }
-    }
+        if (
+          batches === 0 &&
+          movements === 0 &&
+          openings === 0 &&
+          purchases === 0 &&
+          sales === 0 &&
+          consignments === 0 &&
+          agreements === 0
+        ) {
+          await tx.itemUnitConversion.deleteMany({ where: { itemId } });
+          await tx.item.delete({ where: { id: itemId } });
+        }
+      })
+    );
 
     return { message: `Opening stock entry ${entry.entryNumber} deleted, reversed, and unused items cleaned.` };
   });

@@ -17,6 +17,7 @@ import {
   FileText
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 interface EmployeeAdvanceItem {
   id: string;
@@ -66,6 +67,7 @@ export const EmployeesPage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -129,18 +131,26 @@ export const EmployeesPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (emp: Employee) => {
-    if (!window.confirm(`Delete employee "${emp.name}"?`)) return;
-    try {
-      setLoading(true);
-      await api.delete(`/parties/employees/${emp.id}`);
-      setStatusMsg(`Employee ${emp.name} deleted.`);
-      loadData();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
-    } finally {
-      setLoading(false);
-    }
+  const handleDelete = (emp: Employee) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Employee',
+      message: `Delete employee "${emp.name}"?`,
+      confirmLabel: 'Yes, Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update
+        setEmployees((prev) => prev.filter((e) => e.id !== emp.id));
+        try {
+          await api.delete(`/parties/employees/${emp.id}`);
+          setStatusMsg(`Employee ${emp.name} deleted.`);
+          loadData();
+        } catch (err: unknown) {
+          setStatusMsg(err instanceof Error ? err.message : 'Delete failed');
+          loadData();
+        }
+      },
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -224,21 +234,26 @@ export const EmployeesPage: React.FC = () => {
   };
 
   // Delete an advance entry
-  const handleDeleteAdvance = async (empId: number, advanceId: string) => {
-    if (!window.confirm('Kya aap yeh advance record delete karna chahte hain?')) return;
-    try {
-      setLoading(true);
-      await api.delete(`/parties/employees/${empId}/advance/${advanceId}`);
-      setStatusMsg('Advance record deleted.');
-      const updated = await api.get<Employee[]>('/parties/employees');
-      setEmployees(updated);
-      const found = updated.find((x) => x.id === empId);
-      if (found) setHistoryEmp(found);
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
-    } finally {
-      setLoading(false);
-    }
+  const handleDeleteAdvance = (empId: number, advanceId: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Advance Record',
+      message: 'Kya aap yeh advance record delete karna chahte hain?',
+      confirmLabel: 'Yes, Delete Advance',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await api.delete(`/parties/employees/${empId}/advance/${advanceId}`);
+          setStatusMsg('Advance record deleted.');
+          const updated = await api.get<Employee[]>('/parties/employees');
+          setEmployees(updated);
+          const found = updated.find((x) => x.id === empId);
+          if (found) setHistoryEmp(found);
+        } catch (err: unknown) {
+          setStatusMsg(err instanceof Error ? err.message : 'Delete failed');
+        }
+      },
+    });
   };
 
   const totalPayroll = employees.reduce((a, e) => a + parseFloat(e.salary || '0'), 0);
@@ -872,6 +887,9 @@ export const EmployeesPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

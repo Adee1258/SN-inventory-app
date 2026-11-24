@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Users, Truck, Plus, CheckCircle, Phone, MapPin, Edit2, Trash2, X, User, RefreshCw, Search } from 'lucide-react';
 import { api } from '../api/client.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 interface Customer {
   id: number;
@@ -41,6 +42,7 @@ export const PartiesPage: React.FC<{ type: 'customers' | 'suppliers' }> = ({ typ
 
   const isCustomer = type === 'customers';
   const [searchQuery, setSearchQuery] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   const loadData = async () => {
     try {
@@ -80,31 +82,53 @@ export const PartiesPage: React.FC<{ type: 'customers' | 'suppliers' }> = ({ typ
     setIsModalOpen(true);
   };
 
-  const handleSyncBalances = async () => {
-    if (!window.confirm('Recalculate and synchronize all customer and supplier balances based on actual invoices?')) return;
-    setLoading(true);
-    setStatusMsg(null);
-    try {
-      const res = await api.post<{ success: boolean; message: string }>('/parties/recalculate', {});
-      setStatusMsg(res.message);
-      await loadData();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Sync failed');
-    } finally {
-      setLoading(false);
-    }
+  const handleSyncBalances = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Sync Balances',
+      message: 'Recalculate and synchronize all customer and supplier balances based on actual invoices?',
+      confirmLabel: 'Yes, Synchronize',
+      isDestructive: false,
+      onConfirm: async () => {
+        setLoading(true);
+        setStatusMsg(null);
+        try {
+          const res = await api.post<{ success: boolean; message: string }>('/parties/recalculate', {});
+          setStatusMsg(res.message);
+          await loadData();
+        } catch (err: unknown) {
+          setStatusMsg(err instanceof Error ? err.message : 'Sync failed');
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
-  const handleDelete = async (party: Customer | Supplier) => {
-    if (!window.confirm(`Delete ${isCustomer ? 'customer' : 'supplier'} "${party.name}"?`)) return;
-    try {
-      setLoading(true);
-      const res = await api.delete<{ message: string; deactivated?: boolean }>(`/parties/${type}/${party.id}`);
-      setStatusMsg(res.message);
-      loadData();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
-    } finally { setLoading(false); }
+  const handleDelete = (party: Customer | Supplier) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Delete ${isCustomer ? 'Customer' : 'Supplier'}`,
+      message: `Delete ${isCustomer ? 'customer' : 'supplier'} "${party.name}"?`,
+      confirmLabel: 'Yes, Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update
+        if (isCustomer) {
+          setCustomers((prev) => prev.filter((c) => c.id !== party.id));
+        } else {
+          setSuppliers((prev) => prev.filter((s) => s.id !== party.id));
+        }
+        try {
+          const res = await api.delete<{ message: string; deactivated?: boolean }>(`/parties/${type}/${party.id}`);
+          setStatusMsg(res.message);
+          loadData();
+        } catch (err: unknown) {
+          setStatusMsg(err instanceof Error ? err.message : 'Delete failed');
+          loadData();
+        }
+      },
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -483,6 +507,9 @@ export const PartiesPage: React.FC<{ type: 'customers' | 'suppliers' }> = ({ typ
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

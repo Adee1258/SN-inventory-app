@@ -4,6 +4,7 @@ import {
   Trash2, ChevronDown, ChevronUp, User, X, RefreshCw, Truck, Pencil, Save, Search,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 /* ─── Types ─── */
 interface Item {
@@ -129,6 +130,7 @@ export const RawMaterialPage: React.FC = () => {
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* new-entry form */
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
@@ -354,16 +356,27 @@ export const RawMaterialPage: React.FC = () => {
   };
 
   /* ── Delete ── */
-  const handleDeleteEntry = async (id: number, entryNumber: string) => {
-    if (!window.confirm(`Delete entry "${entryNumber}"?\n\nThis will remove stock batches and reverse accounting entries.`)) return;
-    try {
-      setLoading(true);
-      await api.delete(`/opening-stock/${id}`);
-      setStatusMsg({ type: 'success', text: `Entry ${entryNumber} deleted.` });
-      loadData(false);
-    } catch (err: unknown) {
-      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
-    } finally { setLoading(false); }
+  const handleDeleteEntry = (id: number, entryNumber: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Raw Material Entry',
+      message: `Delete entry "${entryNumber}"?\n\nThis will remove stock batches and reverse accounting entries.`,
+      confirmLabel: 'Yes, Delete Entry',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update: instantly remove from table without waiting for API
+        const backup = [...openingHistory];
+        setOpeningHistory((prev) => prev.filter((e) => e.id !== id));
+        try {
+          await api.delete(`/opening-stock/${id}`);
+          setStatusMsg({ type: 'success', text: `Entry ${entryNumber} deleted successfully.` });
+          loadData(false);
+        } catch (err: unknown) {
+          setOpeningHistory(backup); // Rollback on error
+          setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+        }
+      },
+    });
   };
 
   /* ─────────────────── search filter for history ─────────────────── */
@@ -1087,6 +1100,9 @@ export const RawMaterialPage: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

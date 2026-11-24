@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 interface CashAccount {
   id: number;
@@ -83,6 +84,7 @@ export const VouchersPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* Helper to detect commission suppliers */
   const isCommSupplier = (s: Party) => {
@@ -134,16 +136,30 @@ export const VouchersPage: React.FC = () => {
   useEffect(() => { loadData(); }, []);
 
   /* ── Delete voucher ── */
-  const handleDelete = async (id: number, voucherNum: string, type: 'receipt' | 'payment') => {
-    if (!window.confirm(`Delete and reverse voucher "${voucherNum}"?\n\nCash balance and GL entries will be reversed.`)) return;
-    try {
-      setLoading(true);
-      await api.delete(type === 'receipt' ? `/vouchers/receipts/${id}` : `/vouchers/payments/${id}`);
-      setStatusMsg({ type: 'success', text: `Voucher ${voucherNum} reversed and deleted.` });
-      loadData();
-    } catch (err: unknown) {
-      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
-    } finally { setLoading(false); }
+  const handleDelete = (id: number, voucherNum: string, type: 'receipt' | 'payment') => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Voucher',
+      message: `Delete and reverse voucher "${voucherNum}"?\n\nCash balance and GL entries will be reversed.`,
+      confirmLabel: 'Yes, Delete Voucher',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update: instantly remove from the respective list
+        if (type === 'receipt') {
+          setRecentReceipts((prev) => prev.filter((r) => r.id !== id));
+        } else {
+          setRecentPayments((prev) => prev.filter((p) => p.id !== id));
+        }
+        try {
+          await api.delete(type === 'receipt' ? `/vouchers/receipts/${id}` : `/vouchers/payments/${id}`);
+          setStatusMsg({ type: 'success', text: `Voucher ${voucherNum} reversed and deleted.` });
+          loadData();
+        } catch (err: unknown) {
+          setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+          loadData();
+        }
+      },
+    });
   };
 
   /* ── Submit voucher ── */
@@ -1060,6 +1076,9 @@ export const VouchersPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

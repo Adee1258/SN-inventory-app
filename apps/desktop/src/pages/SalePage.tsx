@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client.js';
 import { InvoiceModal } from '../components/invoices/InvoiceModal.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 /* ─── Types ─── */
 interface ItemBase {
@@ -137,6 +138,7 @@ export const SalePage: React.FC = () => {
   /* ── UI state ── */
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string; invoiceNumber?: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [expandedSale, setExpandedSale] = useState<number | null>(null);
@@ -355,17 +357,28 @@ export const SalePage: React.FC = () => {
   };
 
   /* ─────────────────── delete ─────────────────── */
-  const handleDeleteSale = async (id: number, invoiceNum: string) => {
-    if (!window.confirm(`Cancel and delete sale invoice "${invoiceNum}"?\n\nThis will restore all deducted stock and reverse the customer receivable.`)) return;
-    try {
-      setLoading(true);
-      const res = await api.delete<{ message: string }>(`/sales/${id}`);
-      setStatusMsg({ type: 'success', text: res.message || `Invoice ${invoiceNum} deleted.` });
-      setCommissionStock({});
-      await loadData();
-    } catch (err) {
-      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
-    } finally { setLoading(false); }
+  const handleDeleteSale = (id: number, invoiceNum: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Cancel & Delete Sale Invoice',
+      message: `Cancel and delete sale invoice "${invoiceNum}"?\n\nThis will restore all deducted stock and reverse the customer receivable.`,
+      confirmLabel: 'Yes, Delete Sale',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update: instantly remove from table
+        const backup = [...recentSales];
+        setRecentSales((prev) => prev.filter((s) => s.id !== id));
+        try {
+          const res = await api.delete<{ message: string }>(`/sales/${id}`);
+          setStatusMsg({ type: 'success', text: res.message || `Invoice ${invoiceNum} deleted.` });
+          setCommissionStock({});
+          loadData();
+        } catch (err) {
+          setRecentSales(backup); // Rollback on error
+          setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+        }
+      },
+    });
   };
 
   /* ─────────────────── search filter for history ─────────────────── */
@@ -1082,6 +1095,9 @@ export const SalePage: React.FC = () => {
         type="sale"
         invoice={selectedInvoiceForModal}
       />
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

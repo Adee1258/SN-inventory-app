@@ -62,10 +62,8 @@ router.get('/categories', async (_req: Request, res: Response) => {
   return res.json({ success: true, data: categories });
 });
 
-// Items List with conversions & stock summary (with auto-cleanup of orphans)
+// Items List with conversions & stock summary
 router.get('/', async (_req: Request, res: Response) => {
-  await cleanupOrphanItems();
-
   const items = await prisma.item.findMany({
     where: { isActive: true },
     include: {

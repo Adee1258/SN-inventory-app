@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client.js';
 import { exportToCsv, printDocument } from '../utils/exportUtils.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 /* ─── Types ─── */
 interface TrialBalanceAccount {
@@ -319,6 +320,7 @@ export const AccountsPage: React.FC = () => {
   const [coaActionLoading, setCoaActionLoading] = useState(false);
   const [coaNotice, setCoaNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [editingAccount, setEditingAccount] = useState<ChartAccount | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* Load all financial data */
   const loadData = async (targetSegment?: 'ALL' | 'OWN' | 'CONSIGNMENT' | unknown) => {
@@ -515,20 +517,25 @@ export const AccountsPage: React.FC = () => {
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete account "${acc.accountCode} - ${acc.accountName}"?`)) {
-      return;
-    }
-
-    setCoaActionLoading(true);
-    try {
-      await api.delete(`/accounting/chart-of-accounts/${acc.id}`);
-      setCoaNotice({ type: 'success', text: `Account ${acc.accountCode} deleted successfully.` });
-      await loadData();
-    } catch (err: any) {
-      setCoaNotice({ type: 'error', text: err?.message || 'Failed to delete account.' });
-    } finally {
-      setCoaActionLoading(false);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Account',
+      message: `Are you sure you want to delete account "${acc.accountCode} - ${acc.accountName}"?`,
+      confirmLabel: 'Yes, Delete Account',
+      isDestructive: true,
+      onConfirm: async () => {
+        setCoaActionLoading(true);
+        try {
+          await api.delete(`/accounting/chart-of-accounts/${acc.id}`);
+          setCoaNotice({ type: 'success', text: `Account ${acc.accountCode} deleted successfully.` });
+          await loadData();
+        } catch (err: any) {
+          setCoaNotice({ type: 'error', text: err?.message || 'Failed to delete account.' });
+        } finally {
+          setCoaActionLoading(false);
+        }
+      },
+    });
   };
 
   const handleUpdateAccount = async (e: React.FormEvent) => {
@@ -551,21 +558,26 @@ export const AccountsPage: React.FC = () => {
     }
   };
 
-  const handleRegenerateCOA = async () => {
-    if (!window.confirm('Do you want to regenerate and synchronize the complete Wholesale Mandi Chart of Accounts? This will add any missing standard accounts without affecting existing ones.')) {
-      return;
-    }
-
-    setCoaActionLoading(true);
-    try {
-      const res: any = await api.post('/accounting/chart-of-accounts/regenerate', {});
-      setCoaNotice({ type: 'success', text: res?.message || 'Chart of Accounts regenerated successfully!' });
-      await loadData();
-    } catch (err: any) {
-      setCoaNotice({ type: 'error', text: err?.message || 'Failed to regenerate Chart of Accounts.' });
-    } finally {
-      setCoaActionLoading(false);
-    }
+  const handleRegenerateCOA = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Synchronize Chart of Accounts',
+      message: 'Do you want to regenerate and synchronize the complete Wholesale Mandi Chart of Accounts? This will add any missing standard accounts without affecting existing ones.',
+      confirmLabel: 'Yes, Synchronize',
+      isDestructive: false,
+      onConfirm: async () => {
+        setCoaActionLoading(true);
+        try {
+          const res: any = await api.post('/accounting/chart-of-accounts/regenerate', {});
+          setCoaNotice({ type: 'success', text: res?.message || 'Chart of Accounts regenerated successfully!' });
+          await loadData();
+        } catch (err: any) {
+          setCoaNotice({ type: 'error', text: err?.message || 'Failed to regenerate Chart of Accounts.' });
+        } finally {
+          setCoaActionLoading(false);
+        }
+      },
+    });
   };
 
   /* ── Export CSV for active view ── */
@@ -693,28 +705,34 @@ export const AccountsPage: React.FC = () => {
     }, 400);
   };
 
-  const handleRepairTB = async () => {
-    if (!window.confirm('Do you want to run Ledger Sync & Repair? This will verify all general ledger accounts and re-synchronize double entries.')) {
-      return;
-    }
-    setTbRepairing(true);
-    try {
-      await api.post('/accounting/chart-of-accounts/regenerate', {});
-      await handleGenerateTB(tbAsOfDate);
-      setTbCheckStatus({
-        checked: true,
-        isBalanced: true,
-        message: 'Repair Successful: Chart of accounts synchronized and ledger balances re-calculated!',
-      });
-    } catch (err: any) {
-      setTbCheckStatus({
-        checked: true,
-        isBalanced: false,
-        message: `Repair failed: ${err?.message || 'Error occurred during repair'}`,
-      });
-    } finally {
-      setTbRepairing(false);
-    }
+  const handleRepairTB = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Run Ledger Sync & Repair',
+      message: 'Do you want to run Ledger Sync & Repair? This will verify all general ledger accounts and re-synchronize double entries.',
+      confirmLabel: 'Yes, Run Repair',
+      isDestructive: false,
+      onConfirm: async () => {
+        setTbRepairing(true);
+        try {
+          await api.post('/accounting/chart-of-accounts/regenerate', {});
+          await handleGenerateTB(tbAsOfDate);
+          setTbCheckStatus({
+            checked: true,
+            isBalanced: true,
+            message: 'Repair Successful: Chart of accounts synchronized and ledger balances re-calculated!',
+          });
+        } catch (err: any) {
+          setTbCheckStatus({
+            checked: true,
+            isBalanced: false,
+            message: `Repair failed: ${err?.message || 'Error occurred during repair'}`,
+          });
+        } finally {
+          setTbRepairing(false);
+        }
+      },
+    });
   };
 
   // ─── JV Helpers & Actions ───
@@ -905,32 +923,37 @@ export const AccountsPage: React.FC = () => {
       return;
     }
 
-    if (!window.confirm(`Kya aap waqai is saal ka Net Profit (Rs. ${pnl.netProfit}) Owner Capital/Retained Earnings mein shift karna chahtay hain?`)) {
-      return;
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Year-End Financial Closing',
+      message: `Kya aap waqai is saal ka Net Profit (Rs. ${pnl.netProfit}) Owner Capital/Retained Earnings mein shift karna chahtay hain?`,
+      confirmLabel: 'Yes, Execute Closing',
+      isDestructive: false,
+      onConfirm: async () => {
+        setClosingLoading(true);
+        setClosingNotice(null);
+        try {
+          const res: any = await api.post('/accounting/year-end-closing', {
+            closingDate,
+            targetAccountCode: closingTargetCode,
+            notes: closingNotes || `Year-end financial closing: Net profit transfer`,
+          });
 
-    setClosingLoading(true);
-    setClosingNotice(null);
-    try {
-      const res: any = await api.post('/accounting/year-end-closing', {
-        closingDate,
-        targetAccountCode: closingTargetCode,
-        notes: closingNotes || `Year-end financial closing: Net profit transfer`,
-      });
-
-      setClosingNotice({
-        type: 'success',
-        text: res?.message || 'Year-end financial closing successful!',
-      });
-      await loadData();
-    } catch (err: any) {
-      setClosingNotice({
-        type: 'error',
-        text: err?.message || 'Year-end closing failed.',
-      });
-    } finally {
-      setClosingLoading(false);
-    }
+          setClosingNotice({
+            type: 'success',
+            text: res?.message || 'Year-end financial closing successful!',
+          });
+          await loadData();
+        } catch (err: any) {
+          setClosingNotice({
+            type: 'error',
+            text: err?.message || 'Year-end closing failed.',
+          });
+        } finally {
+          setClosingLoading(false);
+        }
+      },
+    });
   };
 
   /* ── Segment Counts for Buttons ── */
@@ -3249,6 +3272,9 @@ export const AccountsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };

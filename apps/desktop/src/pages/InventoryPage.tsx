@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Warehouse, Boxes, Search, RefreshCw, Layers, TrendingUp, Package, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
 import { api } from '../api/client.js';
+import { ConfirmModal, type ConfirmDialogState } from '../components/common/ConfirmModal.js';
 
 interface InventorySummaryItem {
   itemId: number;
@@ -39,6 +40,7 @@ export const InventoryPage: React.FC = () => {
   const [ownershipFilter, setOwnershipFilter] = useState<'ALL' | 'OWN' | 'CONSIGNMENT'>('ALL');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -56,34 +58,51 @@ export const InventoryPage: React.FC = () => {
     }
   };
 
-  const handleDeleteItem = async (id: number, name: string) => {
-    if (!window.confirm(`Delete unused product "${name}"?\n\nThis will remove it completely from inventory and sales.`)) return;
-    setLoading(true);
-    setStatusMsg(null);
-    try {
-      await api.delete(`/items/${id}`);
-      setStatusMsg({ type: 'success', text: `Product "${name}" deleted successfully.` });
-      await loadData();
-    } catch (err: unknown) {
-      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete product' });
-    } finally {
-      setLoading(false);
-    }
+  const handleDeleteItem = (id: number, name: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Product',
+      message: `Delete unused product "${name}"?\n\nThis will remove it completely from inventory and sales.`,
+      confirmLabel: 'Yes, Delete Product',
+      isDestructive: true,
+      onConfirm: async () => {
+        // Optimistic UI update: instantly remove from view
+        const backup = [...summary];
+        setSummary((prev) => prev.filter((i) => i.itemId !== id));
+        setStatusMsg(null);
+        try {
+          await api.delete(`/items/${id}`);
+          setStatusMsg({ type: 'success', text: `Product "${name}" deleted successfully.` });
+          loadData();
+        } catch (err: unknown) {
+          setSummary(backup); // Rollback on error
+          setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete product' });
+        }
+      },
+    });
   };
 
-  const handleCleanupOrphans = async () => {
-    if (!window.confirm('Clean up all unused products?\n\nThis will permanently remove all test products that have 0 stock and no transaction history.')) return;
-    setLoading(true);
-    setStatusMsg(null);
-    try {
-      const res = await api.post<{ success: boolean; deletedCount: number; message: string }>('/items/cleanup-orphans', {});
-      setStatusMsg({ type: 'success', text: res.message });
-      await loadData();
-    } catch (err: unknown) {
-      setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Cleanup failed' });
-    } finally {
-      setLoading(false);
-    }
+  const handleCleanupOrphans = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Clean Up Unused Products',
+      message: 'Clean up all unused products?\n\nThis will permanently remove all test products that have 0 stock and no transaction history.',
+      confirmLabel: 'Yes, Clean Up',
+      isDestructive: false,
+      onConfirm: async () => {
+        setLoading(true);
+        setStatusMsg(null);
+        try {
+          const res = await api.post<{ success: boolean; deletedCount: number; message: string }>('/items/cleanup-orphans', {});
+          setStatusMsg({ type: 'success', text: res.message });
+          await loadData();
+        } catch (err: unknown) {
+          setStatusMsg({ type: 'error', text: err instanceof Error ? err.message : 'Cleanup failed' });
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   useEffect(() => { loadData(); }, []);
@@ -348,6 +367,9 @@ export const InventoryPage: React.FC = () => {
           </table>
         </div>
       )}
+
+      {/* Confirmation Modal — avoids native window.confirm Electron input freeze */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 };
