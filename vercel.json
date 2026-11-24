@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "prisma generate --schema=./prisma/schema.prisma",
+  "buildCommand": "prisma generate --schema=./prisma/schema.prisma && cd apps/desktop && npx vite build --outDir ../../public --emptyOutDir",
   "builds": [
     {
       "src": "api/index.js",
@@ -8,9 +8,16 @@
       "config": {
         "includeFiles": ["api/_bundle.js", "node_modules/.prisma/**", "node_modules/@prisma/**"]
       }
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/api/index.js" }
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/assets/(.*)", "dest": "/public/assets/$1" },
+    { "src": "/favicon.ico", "dest": "/public/favicon.ico" },
+    { "src": "/(.*)", "dest": "/public/index.html" }
   ]
 }
