@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { OpeningStockCreateSchema } from '@erp/validation';
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { calculateBaseQuantity, Decimal, toMoney, toQuantity } from '@erp/business-rules';
@@ -66,7 +66,7 @@ router.get('/', async (_req: Request, res: Response) => {
 router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = OpeningStockCreateSchema.parse(req.body);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     // Generate Sequence
     const seq = await tx.documentSequence.upsert({
       where: { sequenceType: 'OPENING_STOCK' },
@@ -103,15 +103,15 @@ router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
           multiplier = new Decimal(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(itemInput.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(itemInput.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${itemInput.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === 'MANN') {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: 'mann_default_kg' } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: 'mann_default_kg' } });
             multiplier = new Decimal(row?.settingValue || '40');
           } else if (uCode === 'BAG') {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: 'bag_default_kg' } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: 'bag_default_kg' } });
             multiplier = new Decimal(row?.settingValue || '50');
           } else {
             throw new Error(`Conversion not configured for item ${item.name} and unit ID ${itemInput.unitId}`);
@@ -265,7 +265,7 @@ router.patch('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   });
   if (!entry) throw new Error('Opening stock entry not found');
 
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     // Update entry-level notes
     if (notes !== undefined) {
       await tx.openingStockEntry.update({
@@ -389,7 +389,7 @@ router.patch('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
 router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   const entryId = BigInt(req.params.id);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const entry = await tx.openingStockEntry.findUnique({
       where: { id: entryId },
       include: { items: true },

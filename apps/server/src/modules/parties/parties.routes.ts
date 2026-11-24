@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { CustomerCreateSchema, SupplierCreateSchema } from '@erp/validation';
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { Decimal } from '@erp/business-rules';
@@ -19,7 +19,7 @@ router.get('/customers', async (_req: Request, res: Response) => {
 router.post('/customers', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = CustomerCreateSchema.parse(req.body);
 
-  const customer = await prisma.$transaction(async (tx) => {
+  const customer = await dbTx(async (tx) => {
     const openingBalDec = new Decimal(validated.openingBalance);
     const newCust = await tx.customer.create({
       data: {
@@ -152,7 +152,7 @@ router.delete('/customers/:id', requireOwnerAuth, async (req: Request, res: Resp
   }
 
   // If no transactions exist, remove opening journal lines and delete record cleanly
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     // Clean up opening journal lines if any
     const openingJournals = await tx.journalEntry.findMany({
       where: { referenceType: 'OPENING_STOCK', referenceId: customerId },
@@ -224,7 +224,7 @@ router.get('/suppliers', async (_req: Request, res: Response) => {
 router.post('/suppliers', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = SupplierCreateSchema.parse(req.body);
 
-  const supplier = await prisma.$transaction(async (tx) => {
+  const supplier = await dbTx(async (tx) => {
     const ownBalDec = new Decimal(validated.openingBalanceOwn);
     const consBalDec = new Decimal(validated.openingBalanceConsignment);
 
@@ -372,7 +372,7 @@ router.delete('/suppliers/:id', requireOwnerAuth, async (req: Request, res: Resp
     });
   }
 
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     // Clean up opening journal lines
     const openingJournals = await tx.journalEntry.findMany({
       where: { referenceType: 'OPENING_STOCK', referenceId: supplierId },
@@ -722,7 +722,7 @@ router.delete('/employees/:id', requireOwnerAuth, async (req: Request, res: Resp
 
 // Recalculate & Sync All Customer and Supplier Balances
 router.post('/recalculate', requireOwnerAuth, async (_req: Request, res: Response) => {
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     // 1. Customers
     const customers = await tx.customer.findMany({
       include: {

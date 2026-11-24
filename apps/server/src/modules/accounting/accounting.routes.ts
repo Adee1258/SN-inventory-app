@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { DocumentReferenceType } from '@prisma/client';
 import { Decimal, toMoney, formatMoney } from '@erp/business-rules';
 import { createBalancedJournalEntry } from '../../accounting/posting-engine.js';
@@ -330,7 +330,7 @@ router.post('/chart-of-accounts', async (req: Request, res: Response) => {
     const opBal = openingBalance ? Math.abs(parseFloat(String(openingBalance))) : 0;
     const opType = openingBalanceType === 'CREDIT' ? 'CREDIT' : (category === 'ASSET' || category === 'EXPENSE' ? 'DEBIT' : 'CREDIT');
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await dbTx(async (tx) => {
       const account = await tx.chartOfAccounts.create({
         data: {
           accountCode: cleanCode,
@@ -608,7 +608,7 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       });
     }
 
-    const journal = await prisma.$transaction(async (tx) => {
+    const journal = await dbTx(async (tx) => {
       return await createBalancedJournalEntry({
         tx,
         entryDate: voucherDate ? new Date(voucherDate) : new Date(),
@@ -1064,7 +1064,7 @@ router.post('/year-end-closing', async (req: Request, res: Response) => {
       });
     }
 
-    const journal = await prisma.$transaction(async (tx) => {
+    const journal = await dbTx(async (tx) => {
       const isProfit = netProfit.isPositive();
       const absAmount = netProfit.abs();
 

@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { SaleCreateSchema, SalesReturnCreateSchema } from '@erp/validation';
 import { requireDeviceOrOwnerAuth, type AuthenticatedRequest } from '../../middleware/auth.js';
 import {
@@ -38,7 +38,7 @@ router.get('/', async (_req: Request, res: Response) => {
 router.post('/', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res: Response) => {
   const validated = SaleCreateSchema.parse(req.body);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const customer = await tx.customer.findUnique({
       where: { id: BigInt(validated.customerId) },
     });
@@ -96,15 +96,15 @@ router.post('/', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res
           multiplier = new Decimal(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(line.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(line.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${line.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === 'MANN') {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: 'mann_default_kg' } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: 'mann_default_kg' } });
             multiplier = new Decimal(row?.settingValue || '40');
           } else if (uCode === 'BAG') {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: 'bag_default_kg' } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: 'bag_default_kg' } });
             multiplier = new Decimal(row?.settingValue || '50');
           } else {
             throw new Error(`Unit conversion not defined for item ${item.name} and unit ID ${line.unitId}`);
@@ -502,7 +502,7 @@ router.get('/returns', async (_req: Request, res: Response) => {
 router.post('/returns', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res: Response) => {
   const validated = SalesReturnCreateSchema.parse(req.body);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.salesInvoice.findUnique({
       where: { id: BigInt(validated.salesInvoiceId) },
     });
@@ -746,7 +746,7 @@ router.post('/returns', requireDeviceOrOwnerAuth, async (req: AuthenticatedReque
 router.delete('/:id', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res: Response) => {
   const saleId = BigInt(req.params.id);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.salesInvoice.findUnique({
       where: { id: saleId },
       include: {

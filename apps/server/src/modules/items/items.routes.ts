@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { ItemCreateSchema } from '@erp/validation';
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { Decimal } from '@erp/business-rules';
@@ -30,7 +30,7 @@ export async function cleanupOrphanItems(): Promise<number> {
         saleCount === 0 &&
         consignmentCount === 0
       ) {
-        await prisma.$transaction(async (tx) => {
+        await dbTx(async (tx) => {
           await tx.commissionAgreement.deleteMany({ where: { itemId: item.id } });
           await tx.itemUnitConversion.deleteMany({ where: { itemId: item.id } });
           await tx.stockMovement.deleteMany({ where: { itemId: item.id } });
@@ -153,7 +153,7 @@ router.get('/', async (_req: Request, res: Response) => {
 router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = ItemCreateSchema.parse(req.body);
 
-  const item = await prisma.$transaction(async (tx) => {
+  const item = await dbTx(async (tx) => {
     const newItem = await tx.item.create({
       data: {
         code: validated.code,
@@ -218,7 +218,7 @@ router.put('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   const itemId = BigInt(req.params.id);
   const { name, description, minStockLevel, defaultSaleRate, conversions } = req.body;
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await dbTx(async (tx) => {
     const item = await tx.item.update({
       where: { id: itemId },
       data: {
@@ -285,7 +285,7 @@ router.post('/cleanup-orphans', requireOwnerAuth, async (_req: Request, res: Res
       saleCount === 0 &&
       consignmentCount === 0
     ) {
-      await prisma.$transaction(async (tx) => {
+      await dbTx(async (tx) => {
         await tx.commissionAgreement.deleteMany({ where: { itemId: item.id } });
         await tx.itemUnitConversion.deleteMany({ where: { itemId: item.id } });
         await tx.stockMovement.deleteMany({ where: { itemId: item.id } });
@@ -344,7 +344,7 @@ router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
     });
   }
 
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     await tx.commissionAgreement.deleteMany({ where: { itemId } });
     await tx.itemUnitConversion.deleteMany({ where: { itemId } });
     await tx.stockMovement.deleteMany({ where: { itemId } });

@@ -1,5 +1,5 @@
-import { Router, type Request, type Response } from 'express';
-import { prisma } from '../../database/prisma.js';
+﻿import { Router, type Request, type Response } from 'express';
+import { prisma, dbTx } from '../../database/prisma.js';
 import { ReceiptVoucherSchema, PaymentVoucherSchema } from '@erp/validation';
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { Decimal, toMoney } from '@erp/business-rules';
@@ -59,7 +59,7 @@ router.get('/receipts', async (_req: Request, res: Response) => {
 router.post('/receipts', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = ReceiptVoucherSchema.parse(req.body);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const cashAccount = await tx.cashBankAccount.findUnique({
       where: { id: BigInt(validated.cashBankAccountId) },
     });
@@ -234,7 +234,7 @@ router.get('/payments', async (_req: Request, res: Response) => {
 router.post('/payments', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = PaymentVoucherSchema.parse(req.body);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const cashAccount = await tx.cashBankAccount.findUnique({
       where: { id: BigInt(validated.cashBankAccountId) },
     });
@@ -374,7 +374,7 @@ router.post('/payments', requireOwnerAuth, async (req: Request, res: Response) =
 router.delete('/receipts/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   const voucherId = BigInt(req.params.id);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const voucher = await tx.receiptVoucher.findUnique({
       where: { id: voucherId },
     });
@@ -442,7 +442,7 @@ router.delete('/receipts/:id', requireOwnerAuth, async (req: Request, res: Respo
 router.delete('/payments/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   const voucherId = BigInt(req.params.id);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const voucher = await tx.paymentVoucher.findUnique({
       where: { id: voucherId },
     });

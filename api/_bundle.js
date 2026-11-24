@@ -30344,6 +30344,15 @@ BigInt.prototype.toJSON = function() {
 var prisma = new import_client.PrismaClient({
   log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"]
 });
+async function dbTx(fn, opts) {
+  return prisma.$transaction(fn, {
+    maxWait: 15e3,
+    // 15s max wait for a connection slot
+    timeout: 3e4,
+    // 30s max for the transaction itself
+    ...opts
+  });
+}
 async function checkDatabaseConnection() {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -37343,7 +37352,7 @@ async function cleanupOrphanItems() {
         prisma.consignmentReceiptItem.count({ where: { itemId: item.id } })
       ]);
       if (batchCount === 0 && openingCount === 0 && purchaseCount === 0 && saleCount === 0 && consignmentCount === 0) {
-        await prisma.$transaction(async (tx) => {
+        await dbTx(async (tx) => {
           await tx.commissionAgreement.deleteMany({ where: { itemId: item.id } });
           await tx.itemUnitConversion.deleteMany({ where: { itemId: item.id } });
           await tx.stockMovement.deleteMany({ where: { itemId: item.id } });
@@ -37448,7 +37457,7 @@ router2.get("/", async (_req, res) => {
 });
 router2.post("/", requireOwnerAuth, async (req, res) => {
   const validated = ItemCreateSchema.parse(req.body);
-  const item = await prisma.$transaction(async (tx) => {
+  const item = await dbTx(async (tx) => {
     const newItem = await tx.item.create({
       data: {
         code: validated.code,
@@ -37502,7 +37511,7 @@ router2.post("/", requireOwnerAuth, async (req, res) => {
 router2.put("/:id", requireOwnerAuth, async (req, res) => {
   const itemId = BigInt(req.params.id);
   const { name, description, minStockLevel, defaultSaleRate, conversions } = req.body;
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await dbTx(async (tx) => {
     const item = await tx.item.update({
       where: { id: itemId },
       data: {
@@ -37555,7 +37564,7 @@ router2.post("/cleanup-orphans", requireOwnerAuth, async (_req, res) => {
       prisma.consignmentReceiptItem.count({ where: { itemId: item.id } })
     ]);
     if (batchCount === 0 && openingCount === 0 && purchaseCount === 0 && saleCount === 0 && consignmentCount === 0) {
-      await prisma.$transaction(async (tx) => {
+      await dbTx(async (tx) => {
         await tx.commissionAgreement.deleteMany({ where: { itemId: item.id } });
         await tx.itemUnitConversion.deleteMany({ where: { itemId: item.id } });
         await tx.stockMovement.deleteMany({ where: { itemId: item.id } });
@@ -37599,7 +37608,7 @@ router2.delete("/:id", requireOwnerAuth, async (req, res) => {
       deactivated: true
     });
   }
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     await tx.commissionAgreement.deleteMany({ where: { itemId } });
     await tx.itemUnitConversion.deleteMany({ where: { itemId } });
     await tx.stockMovement.deleteMany({ where: { itemId } });
@@ -37681,7 +37690,7 @@ router3.get("/customers", async (_req, res) => {
 });
 router3.post("/customers", requireOwnerAuth, async (req, res) => {
   const validated = CustomerCreateSchema.parse(req.body);
-  const customer = await prisma.$transaction(async (tx) => {
+  const customer = await dbTx(async (tx) => {
     const openingBalDec = new decimal_default(validated.openingBalance);
     const newCust = await tx.customer.create({
       data: {
@@ -37794,7 +37803,7 @@ router3.delete("/customers/:id", requireOwnerAuth, async (req, res) => {
       deactivated: true
     });
   }
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     const openingJournals = await tx.journalEntry.findMany({
       where: { referenceType: "OPENING_STOCK", referenceId: customerId },
       select: { id: true }
@@ -37853,7 +37862,7 @@ router3.get("/suppliers", async (_req, res) => {
 });
 router3.post("/suppliers", requireOwnerAuth, async (req, res) => {
   const validated = SupplierCreateSchema.parse(req.body);
-  const supplier = await prisma.$transaction(async (tx) => {
+  const supplier = await dbTx(async (tx) => {
     const ownBalDec = new decimal_default(validated.openingBalanceOwn);
     const consBalDec = new decimal_default(validated.openingBalanceConsignment);
     const newSupp = await tx.supplier.create({
@@ -37981,7 +37990,7 @@ router3.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
       deactivated: true
     });
   }
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     const openingJournals = await tx.journalEntry.findMany({
       where: { referenceType: "OPENING_STOCK", referenceId: supplierId },
       select: { id: true }
@@ -38264,7 +38273,7 @@ router3.delete("/employees/:id", requireOwnerAuth, async (req, res) => {
   return res.json({ success: true, message: "Employee record deleted successfully." });
 });
 router3.post("/recalculate", requireOwnerAuth, async (_req, res) => {
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const customers = await tx.customer.findMany({
       include: {
         salesInvoices: {
@@ -38427,7 +38436,7 @@ router4.get("/", async (_req, res) => {
 });
 router4.post("/", requireOwnerAuth, async (req, res) => {
   const validated = OpeningStockCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const seq = await tx.documentSequence.upsert({
       where: { sequenceType: "OPENING_STOCK" },
       update: { currentNumber: { increment: 1 } },
@@ -38457,15 +38466,15 @@ router4.post("/", requireOwnerAuth, async (req, res) => {
           multiplier = new decimal_default(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(itemInput.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(itemInput.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${itemInput.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === "MANN") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "40");
           } else if (uCode === "BAG") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "50");
           } else {
             throw new Error(`Conversion not configured for item ${item.name} and unit ID ${itemInput.unitId}`);
@@ -38588,7 +38597,7 @@ router4.patch("/:id", requireOwnerAuth, async (req, res) => {
     include: { items: true }
   });
   if (!entry) throw new Error("Opening stock entry not found");
-  await prisma.$transaction(async (tx) => {
+  await dbTx(async (tx) => {
     if (notes !== void 0) {
       await tx.openingStockEntry.update({
         where: { id: entryId },
@@ -38690,7 +38699,7 @@ router4.patch("/:id", requireOwnerAuth, async (req, res) => {
 });
 router4.delete("/:id", requireOwnerAuth, async (req, res) => {
   const entryId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const entry = await tx.openingStockEntry.findUnique({
       where: { id: entryId },
       include: { items: true }
@@ -38972,7 +38981,7 @@ router6.get("/:id", async (req, res) => {
 });
 router6.post("/", requireOwnerAuth, async (req, res) => {
   const validated = PurchaseCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: BigInt(validated.supplierId) }
     });
@@ -38997,15 +39006,15 @@ router6.post("/", requireOwnerAuth, async (req, res) => {
           multiplier = new decimal_default(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(line.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(line.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${line.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === "MANN") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "40");
           } else if (uCode === "BAG") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "50");
           } else {
             throw new Error(`Unit conversion not defined for item ${item.name} and unit ID ${line.unitId}`);
@@ -39195,7 +39204,7 @@ router6.get("/returns", async (_req, res) => {
 });
 router6.post("/returns", requireOwnerAuth, async (req, res) => {
   const validated = PurchaseReturnCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.purchaseInvoice.findUnique({
       where: { id: BigInt(validated.purchaseInvoiceId) }
     });
@@ -39320,7 +39329,7 @@ router6.post("/returns", requireOwnerAuth, async (req, res) => {
 });
 router6.delete("/:id", requireOwnerAuth, async (req, res) => {
   const purchaseId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.purchaseInvoice.findUnique({
       where: { id: purchaseId },
       include: {
@@ -39465,7 +39474,7 @@ router7.get("/receipts", async (_req, res) => {
 });
 router7.post("/receipts", requireOwnerAuth, async (req, res) => {
   const validated = ConsignmentReceiptCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: BigInt(validated.supplierId) }
     });
@@ -39494,15 +39503,15 @@ router7.post("/receipts", requireOwnerAuth, async (req, res) => {
           multiplier = new decimal_default(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(line.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(line.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${line.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === "MANN") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "40");
           } else if (uCode === "BAG") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "50");
           } else {
             throw new Error(`Unit conversion not defined for item ${item.name} and unit ID ${line.unitId}`);
@@ -39569,7 +39578,7 @@ router7.post("/receipts", requireOwnerAuth, async (req, res) => {
 router7.put("/receipts/:id", requireOwnerAuth, async (req, res) => {
   const receiptId = BigInt(req.params.id);
   const { receiptDate, notes, referenceRate } = req.body;
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const receipt = await tx.consignmentReceipt.findUnique({
       where: { id: receiptId },
       include: { items: true }
@@ -39629,7 +39638,7 @@ router7.put("/receipts/:id", requireOwnerAuth, async (req, res) => {
 });
 router7.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
   const receiptId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const receipt = await tx.consignmentReceipt.findUnique({
       where: { id: receiptId },
       include: { items: true }
@@ -39731,7 +39740,7 @@ router7.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
 });
 router7.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
   const supplierId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: supplierId },
       include: {
@@ -39842,7 +39851,7 @@ router7.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
 });
 router7.post("/settlements", requireOwnerAuth, async (req, res) => {
   const validated = SupplierSettlementSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: BigInt(validated.supplierId) }
     });
@@ -39937,7 +39946,7 @@ router7.get("/returns", async (_req, res) => {
 });
 router7.post("/returns", requireOwnerAuth, async (req, res) => {
   const validated = ConsignmentReturnCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: BigInt(validated.supplierId) }
     });
@@ -40028,7 +40037,7 @@ router7.get("/advances/:supplierId", async (req, res) => {
 });
 router7.post("/advances", requireOwnerAuth, async (req, res) => {
   const validated = SupplierAdvanceCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const supplier = await tx.supplier.findUnique({
       where: { id: BigInt(validated.supplierId) }
     });
@@ -40351,7 +40360,7 @@ router7.post("/intake", requireOwnerAuth, async (req, res) => {
     throw new Error("Quantity sahi nahi hai");
   if (!commissionPercentage || isNaN(parseFloat(commissionPercentage)))
     throw new Error("Commission % sahi nahi hai");
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     let supplier;
     if (supplierMode === "existing" && supId) {
       supplier = await tx.supplier.findUnique({ where: { id: BigInt(supId) } });
@@ -40616,7 +40625,7 @@ router8.get("/", async (_req, res) => {
 });
 router8.post("/", requireDeviceOrOwnerAuth, async (req, res) => {
   const validated = SaleCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const customer = await tx.customer.findUnique({
       where: { id: BigInt(validated.customerId) }
     });
@@ -40663,15 +40672,15 @@ router8.post("/", requireDeviceOrOwnerAuth, async (req, res) => {
           multiplier = new decimal_default(conv.multiplierToBase);
           unitName = conv.unit.name;
         } else {
-          const targetUnit = await prisma.unit.findUnique({ where: { id: BigInt(line.unitId) } });
+          const targetUnit = await tx.unit.findUnique({ where: { id: BigInt(line.unitId) } });
           if (!targetUnit) throw new Error(`Unit ID ${line.unitId} not found`);
           unitName = targetUnit.name;
           const uCode = targetUnit.code.toUpperCase();
           if (uCode === "MANN") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "mann_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "40");
           } else if (uCode === "BAG") {
-            const row = await prisma.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
+            const row = await tx.appSettings.findUnique({ where: { settingKey: "bag_default_kg" } });
             multiplier = new decimal_default(row?.settingValue || "50");
           } else {
             throw new Error(`Unit conversion not defined for item ${item.name} and unit ID ${line.unitId}`);
@@ -40993,7 +41002,7 @@ router8.get("/returns", async (_req, res) => {
 });
 router8.post("/returns", requireDeviceOrOwnerAuth, async (req, res) => {
   const validated = SalesReturnCreateSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.salesInvoice.findUnique({
       where: { id: BigInt(validated.salesInvoiceId) }
     });
@@ -41199,7 +41208,7 @@ router8.post("/returns", requireDeviceOrOwnerAuth, async (req, res) => {
 });
 router8.delete("/:id", requireDeviceOrOwnerAuth, async (req, res) => {
   const saleId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const invoice = await tx.salesInvoice.findUnique({
       where: { id: saleId },
       include: {
@@ -41592,7 +41601,7 @@ router9.post("/chart-of-accounts", async (req, res) => {
     const parsedParentId = parentId ? BigInt(parentId) : null;
     const opBal = openingBalance ? Math.abs(parseFloat(String(openingBalance))) : 0;
     const opType = openingBalanceType === "CREDIT" ? "CREDIT" : category === "ASSET" || category === "EXPENSE" ? "DEBIT" : "CREDIT";
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await dbTx(async (tx) => {
       const account = await tx.chartOfAccounts.create({
         data: {
           accountCode: cleanCode,
@@ -41829,7 +41838,7 @@ router9.post("/journal-entries", async (req, res) => {
         message: "Journal Voucher mein kam az kam 2 lines (Debit aur Credit) lazmi hain."
       });
     }
-    const journal = await prisma.$transaction(async (tx) => {
+    const journal = await dbTx(async (tx) => {
       return await createBalancedJournalEntry({
         tx,
         entryDate: voucherDate ? new Date(voucherDate) : /* @__PURE__ */ new Date(),
@@ -42200,7 +42209,7 @@ router9.post("/year-end-closing", async (req, res) => {
         }
       });
     }
-    const journal = await prisma.$transaction(async (tx) => {
+    const journal = await dbTx(async (tx) => {
       const isProfit = netProfit.isPositive();
       const absAmount = netProfit.abs();
       const lines = isProfit ? [
@@ -42296,7 +42305,7 @@ router10.get("/receipts", async (_req, res) => {
 });
 router10.post("/receipts", requireOwnerAuth, async (req, res) => {
   const validated = ReceiptVoucherSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const cashAccount = await tx.cashBankAccount.findUnique({
       where: { id: BigInt(validated.cashBankAccountId) }
     });
@@ -42444,7 +42453,7 @@ router10.get("/payments", async (_req, res) => {
 });
 router10.post("/payments", requireOwnerAuth, async (req, res) => {
   const validated = PaymentVoucherSchema.parse(req.body);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const cashAccount = await tx.cashBankAccount.findUnique({
       where: { id: BigInt(validated.cashBankAccountId) }
     });
@@ -42561,7 +42570,7 @@ router10.post("/payments", requireOwnerAuth, async (req, res) => {
 });
 router10.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
   const voucherId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const voucher = await tx.receiptVoucher.findUnique({
       where: { id: voucherId }
     });
@@ -42617,7 +42626,7 @@ router10.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
 });
 router10.delete("/payments/:id", requireOwnerAuth, async (req, res) => {
   const voucherId = BigInt(req.params.id);
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await dbTx(async (tx) => {
     const voucher = await tx.paymentVoucher.findUnique({
       where: { id: voucherId }
     });

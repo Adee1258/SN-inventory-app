@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "SN Inventory ERP Desktop Application",
   "author": "SN Inventory",
-  "type": "module",
   "main": "./dist-electron/main.js",
   "scripts": {
     "dev": "vite",
