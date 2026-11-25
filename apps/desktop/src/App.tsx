@@ -15,30 +15,52 @@ import { LedgerPage } from './pages/LedgerPage.js';
 import { EmployeesPage } from './pages/EmployeesPage.js';
 import { ReportsPage } from './pages/ReportsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { getApiBaseUrl } from './api/client.js';
+import {
+  getActiveBackend,
+  getApiMode,
+  resolveBackendHealth,
+  setApiMode,
+  type ActiveBackend,
+  type ApiMode,
+} from './api/client.js';
 
 export function App() {
   const [activeModule, setActiveModule] = useState<NavModule>('dashboard');
   const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem('erp_token'));
   const [username, setUsername] = useState<string>(localStorage.getItem('erp_user') || 'Admin');
   const [isDbConnected, setIsDbConnected] = useState(true);
+  const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode);
+  const [activeBackend, setActiveBackendState] = useState<ActiveBackend>(getActiveBackend);
 
   const checkHealth = async () => {
-    try {
-      const baseUrl = getApiBaseUrl();
-      const rootUrl = baseUrl.replace(/\/api\/v1\/?$/, '');
-      const healthUrl = `${rootUrl}/health`;
-      const res = await fetch(healthUrl);
-      const data = await res.json();
-      setIsDbConnected(Boolean(data.databaseConnected || data.status === 'OK'));
-    } catch {
-      setIsDbConnected(false);
-    }
+    const result = await resolveBackendHealth();
+    setIsDbConnected(result.connected);
+    setActiveBackendState(result.backend);
+  };
+
+  const handleCycleApiMode = () => {
+    const order: ApiMode[] = ['auto', 'offline', 'online'];
+    const next = order[(order.indexOf(apiMode) + 1) % order.length];
+    setApiMode(next);
+    setApiModeState(next);
+    checkHealth();
   };
 
   useEffect(() => {
     checkHealth();
     const interval = setInterval(checkHealth, 15000);
+
+    const onBackendChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<ActiveBackend>;
+      if (customEvent.detail) setActiveBackendState(customEvent.detail);
+    };
+    window.addEventListener('erp_backend_changed', onBackendChanged);
+
+    const onModeChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<ApiMode>;
+      if (customEvent.detail) setApiModeState(customEvent.detail);
+    };
+    window.addEventListener('erp_api_mode_changed', onModeChanged);
 
     const onAuthExpired = () => {
       setAuthToken(null);
@@ -57,6 +79,8 @@ export function App() {
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener('erp_backend_changed', onBackendChanged);
+      window.removeEventListener('erp_api_mode_changed', onModeChanged);
       window.removeEventListener('erp_auth_expired', onAuthExpired);
       window.removeEventListener('erp_user_updated', onUserUpdated);
     };
@@ -126,7 +150,9 @@ export function App() {
         <Header
           title={getModuleTitle()}
           isDbConnected={isDbConnected}
-          cloudSyncEnabled={false}
+          cloudSyncEnabled={activeBackend === 'cloud'}
+          apiMode={apiMode}
+          onCycleApiMode={handleCycleApiMode}
           username={username}
           onLogout={handleLogout}
         />

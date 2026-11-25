@@ -1144,6 +1144,7 @@ router.post('/intake', requireOwnerAuth, async (req: Request, res: Response) => 
     supplierId: supId,   // when mode = existing
     supplierName,        // when mode = new
     supplierPhone,       // when mode = new (optional)
+    supplierAddress,     // when mode = new (optional)
 
     itemMode,            // 'existing' | 'new'
     itemId: itmId,       // when mode = existing
@@ -1184,6 +1185,7 @@ router.post('/intake', requireOwnerAuth, async (req: Request, res: Response) => 
             code,
             name: supplierName.trim(),
             phone: supplierPhone?.trim() || '03000000000',
+            address: supplierAddress?.trim() || '',
             openingBalanceOwn: new Decimal(0),
             openingBalanceConsignment: new Decimal(0),
             currentBalanceOwn: new Decimal(0),

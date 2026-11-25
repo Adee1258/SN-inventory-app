@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:electron": "npm run build && node ../../scripts/build-electron.mjs && electron-builder",
+    "build:electron": "npm run build && node ../../scripts/build-server.mjs && node ../../scripts/build-electron.mjs && electron-builder",
     "preview": "vite preview",
     "clean": "rimraf dist dist-electron release"
   },
@@ -21,6 +21,20 @@
       "dist/**/*",
       "dist-electron/**/*",
       "preload/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/dist/bundle.js",
+        "to": "server/bundle.js"
+      },
+      {
+        "from": "../../node_modules/@prisma/client",
+        "to": "server/node_modules/@prisma/client"
+      },
+      {
+        "from": "../../node_modules/.prisma",
+        "to": "server/node_modules/.prisma"
+      }
     ],
     "win": {
       "target": "nsis",

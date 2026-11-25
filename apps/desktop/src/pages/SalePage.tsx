@@ -786,7 +786,11 @@ export const SalePage: React.FC = () => {
                 noStockWarning = !poolLoading && commissionStock[line.supplierId] !== undefined && itemPool.length === 0;
               }
             } else {
-              itemPool = allItems;
+              // Bug #3 Fix: Own Stock tab should ONLY show own-stock items (not commission/consignment items)
+              itemPool = allItems.filter((i: any) => {
+                const catName = (i.category?.name || '').toLowerCase();
+                return !catName.includes('consign') && !catName.includes('commis');
+              });
             }
 
             /* filter by typed text */

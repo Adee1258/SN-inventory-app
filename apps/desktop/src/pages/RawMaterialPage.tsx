@@ -213,7 +213,11 @@ export const RawMaterialPage: React.FC = () => {
     }
     const name = f.materialName.trim();
     if (!name) throw new Error('Material name is required');
-    const defaultCategoryId = categories[0]?.id;
+    // Bug #1 Fix: Don't auto-select "Consignment Items" as default — pick first non-consignment category
+    const defaultCategoryId = (
+      categories.find(c => !c.name.toLowerCase().includes('consign') && !c.name.toLowerCase().includes('commis'))
+      ?? categories[0]
+    )?.id;
     if (!defaultCategoryId) throw new Error('No item categories found on server.');
 
     // HAMESHA KG (base unit) ko item ka baseUnit rakho — chahe user ne Mann ya koi bhi unit select ki ho

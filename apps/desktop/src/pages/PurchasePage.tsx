@@ -322,7 +322,11 @@ export const PurchasePage: React.FC = () => {
     }
 
     // 3. Naya Item create karo on-the-fly
-    const defaultCategoryId = categories[0]?.id;
+    // Bug #1 Fix: Don't auto-select "Consignment Items" as default — pick first non-consignment category
+    const defaultCategoryId = (
+      categories.find(c => !c.name.toLowerCase().includes('consign') && !c.name.toLowerCase().includes('commis'))
+      ?? categories[0]
+    )?.id;
     if (!defaultCategoryId) throw new Error('Server par koi item category mojood nahi hai.');
 
     const kgUnit = units.find((u) => u.isBaseUnit);
@@ -932,12 +936,17 @@ export const PurchasePage: React.FC = () => {
           </div>
 
           {lines.map((line, idx) => {
+            // Bug #4 Fix: Purchase should ONLY show own-stock items — exclude commission/consignment items
+            const ownStockItems = allItems.filter((i: any) => {
+              const catName = (i.category?.name || '').toLowerCase();
+              return !catName.includes('consign') && !catName.includes('commis');
+            });
             const filteredPool = line.itemName
-              ? allItems.filter((i) => i.name.toLowerCase().includes(line.itemName.toLowerCase()))
-              : allItems;
+              ? ownStockItems.filter((i) => i.name.toLowerCase().includes(line.itemName.toLowerCase()))
+              : ownStockItems;
 
             const selectedItem = line.selectedItemId
-              ? allItems.find((i) => i.id === line.selectedItemId) ?? null
+              ? ownStockItems.find((i) => i.id === line.selectedItemId) ?? null
               : null;
 
             const lineTotal =

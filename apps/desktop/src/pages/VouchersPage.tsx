@@ -452,11 +452,14 @@ export const VouchersPage: React.FC = () => {
                       className="form-select mt-1"
                     >
                       <option value="">— Customer Select Karein —</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.code}) {c.currentBalanceOwn ? `— Balance: Rs. ${c.currentBalanceOwn}` : ''}
-                        </option>
-                      ))}
+                      {customers.map((c) => {
+                        const bal = (c as any).currentBalance ?? c.currentBalanceOwn ?? '0.00';
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.code}) — Balance: Rs. {bal}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                 )}

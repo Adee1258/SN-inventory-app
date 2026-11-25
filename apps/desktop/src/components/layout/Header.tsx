@@ -1,10 +1,14 @@
 import React from 'react';
 import { Server, Wifi, WifiOff, LogOut } from 'lucide-react';
 
+import type { ApiMode } from '../../api/client.js';
+
 interface HeaderProps {
   title: string;
   isDbConnected: boolean;
   cloudSyncEnabled: boolean;
+  apiMode?: ApiMode;
+  onCycleApiMode?: () => void;
   username?: string;
   onLogout: () => void;
 }
@@ -13,9 +17,19 @@ export const Header: React.FC<HeaderProps> = ({
   title,
   isDbConnected,
   cloudSyncEnabled,
+  apiMode = 'auto',
+  onCycleApiMode,
   username = 'Admin',
   onLogout,
 }) => {
+  const modeLabel =
+    apiMode === 'auto'
+      ? cloudSyncEnabled
+        ? 'Auto • Cloud'
+        : 'Auto • Local'
+      : apiMode === 'online'
+        ? 'Cloud Only'
+        : 'Local Mode';
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 select-none flex-shrink-0 shadow-sm">
       {/* ── Left: Page Title ── */}
@@ -44,13 +58,22 @@ export const Header: React.FC<HeaderProps> = ({
           <span>{isDbConnected ? 'DB Online' : 'DB Offline'}</span>
         </div>
 
-        {/* Cloud / LAN Status */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border bg-gray-50 border-gray-200 text-gray-500">
+        {/* Cloud / Local Mode Switch */}
+        <button
+          type="button"
+          onClick={onCycleApiMode}
+          title="Click to switch connection mode: Auto (Online + Offline fallback) -> Local Only -> Cloud Only"
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ${
+            cloudSyncEnabled
+              ? 'bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100'
+              : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+          }`}
+        >
           {cloudSyncEnabled
             ? <Wifi className="w-3 h-3 text-sky-500" />
-            : <WifiOff className="w-3 h-3 text-gray-400" />}
-          <span>{cloudSyncEnabled ? 'Cloud Sync' : 'Local Mode'}</span>
-        </div>
+            : <WifiOff className="w-3 h-3 text-gray-500" />}
+          <span>{modeLabel}</span>
+        </button>
 
         {/* Divider */}
         <div className="w-px h-5 bg-gray-200" />

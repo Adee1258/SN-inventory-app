@@ -528,7 +528,7 @@ export const LedgerPage: React.FC = () => {
       }
     });
 
-    // Payment Vouchers
+    // Payment Vouchers (we paid supplier -> reduces AP)
     payments.forEach((pm) => {
       if (pm.partyType === 'SUPPLIER' && String(pm.partyId) === String(supplier.id)) {
         if (!pm.narration?.toLowerCase().includes('consignment')) {
@@ -542,6 +542,25 @@ export const LedgerPage: React.FC = () => {
             description: pm.narration || 'Supplier Ko Adaigi (Payment)',
             debit: amt,
             credit: 0,
+          });
+        }
+      }
+    });
+
+    // Receipt Vouchers (cash received from supplier -> increases AP, matches GL Credit 2010 & Supplier Balance)
+    receipts.forEach((rc) => {
+      if (rc.partyType === 'SUPPLIER' && String(rc.partyId) === String(supplier.id)) {
+        if (!rc.narration?.toLowerCase().includes('consignment')) {
+          const d = rc.voucherDate?.split('T')[0];
+          const amt = parseFloat(rc.amount || '0');
+          txs.push({
+            date: rc.voucherDate,
+            sortDate: d,
+            type: 'RECEIPT_VOUCHER',
+            refNo: rc.voucherNumber,
+            description: rc.narration || 'Supplier Se Raqam Wasool (Receipt)',
+            debit: 0,
+            credit: amt,
           });
         }
       }
@@ -580,7 +599,7 @@ export const LedgerPage: React.FC = () => {
       totalCredit,
       closing: running,
     };
-  }, [activeTab, selectedEntityId, suppliers, purchases, payments, dateRange, tableSearch]);
+  }, [activeTab, selectedEntityId, suppliers, purchases, payments, receipts, dateRange, tableSearch]);
 
   // ══════════════════════════════════════════════════════════════════════════════
   // 3. COMMISSION SUPPLIER LEDGER (Amanat Maal, Commission, Kharche & Net Haq)

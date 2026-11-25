@@ -122,10 +122,10 @@ const TABLE_HEADERS: Record<string, string[]> = {
   stock_valuation:     ['Code', 'Item Name', 'Unit', 'Kul Mojood Maal', 'Apna Maal', 'Amanat Maal', 'Apna Maal Valuation (FIFO)'],
   product_list:        ['Code', 'Item Name', 'Category', 'Base Unit', 'Packs/Unit', 'Status'],
   low_stock:           ['Code', 'Item Name', 'Unit', 'Mojooda Stock', 'Status'],
-  daily_sales:         ['Invoice #', 'Date', 'Customer', 'Terms', 'Net Bill', 'Wasool (Paid)', 'Baqi (Balance)'],
+  daily_sales:         ['Invoice #', 'Date', 'Customer', 'Items', 'Terms', 'Net Bill', 'Wasool (Paid)', 'Baqi (Balance)'],
   sale_summary:        ['Date', 'Invoices Count', 'Kul Farokht (Rs.)', 'Kul Wasool (Rs.)', 'Kul Baqi (Rs.)'],
-  unpaid_sales:        ['Invoice #', 'Date', 'Customer', 'Phone', 'Net Bill', 'Wasool', 'Baqi Udhar (Rs.)'],
-  purchase_register:   ['Invoice #', 'Date', 'Supplier', 'Terms', 'Net Landed', 'Paid', 'AP Balance'],
+  unpaid_sales:        ['Invoice #', 'Date', 'Customer', 'Items', 'Terms', 'Net Bill', 'Wasool', 'Baqi Udhar (Rs.)'],
+  purchase_register:   ['Invoice #', 'Date', 'Supplier', 'Items', 'Terms', 'Net Landed', 'Paid', 'AP Balance'],
   purchase_summary:    ['Supplier Name', 'Phone', 'Invoices Count', 'Kul Khareed (Rs.)', 'Paid (Rs.)', 'Baqi Dena (Rs.)'],
   customer_aging:      ['Code', 'Customer Name', 'Phone', 'Address', 'Pehle Ka Balance', 'Baqi Lena (Rs.)'],
   customer_list:       ['Code', 'Customer Name', 'Phone', 'Address', 'Opening Bal.', 'Current Balance'],
@@ -182,6 +182,7 @@ export const ReportsPage: React.FC = () => {
   const fetchReportData = useCallback(async () => {
     setLoading(true);
     setSummaryData(null);
+    setReportData([]);
     try {
       let data: any[] = [];
 
@@ -365,11 +366,22 @@ export const ReportsPage: React.FC = () => {
         setSummaryData({ totalReceivable });
       }
 
-      /* 11. SUPPLIERS */
+      /* 11. SUPPLIERS (Bug #7 Fix: exclude pure commission suppliers from shop supplier reports) */
       else if (selectedReport === 'supplier_ap' || selectedReport === 'supplier_list') {
         // Auto-recalculate supplier balances before showing
         await api.post('/parties/recalculate', {}).catch(() => null);
-        data = await api.get<any[]>('/parties/suppliers');
+        const allSuppliers = await api.get<any[]>('/parties/suppliers');
+        data = (allSuppliers || []).filter((s: any) => {
+          const hasConsign =
+            Number(s._count?.consignmentReceipts || 0) > 0 ||
+            Number(s._count?.commissionAgreements || 0) > 0 ||
+            parseFloat(s.currentBalanceConsignment || '0') !== 0;
+          const hasTrade =
+            Number(s._count?.purchaseInvoices || 0) > 0 ||
+            parseFloat(s.currentBalanceOwn || '0') !== 0 ||
+            parseFloat(s.openingBalanceOwn || '0') !== 0;
+          return !(hasConsign && !hasTrade);
+        });
         let totalOwnAp = 0;
         let totalConsignmentAp = 0;
         data.forEach((s) => {
@@ -489,11 +501,29 @@ export const ReportsPage: React.FC = () => {
     } else if (selectedReport === 'product_list') {
       rows = filteredData.map((i) => [i.code, i.name, i.category?.name || '', i.baseUnit?.symbol || '', i.piecesPerPack || 1, i.isActive ? 'Active' : 'Inactive']);
     } else if (selectedReport === 'daily_sales' || selectedReport === 'unpaid_sales') {
-      rows = filteredData.map((s) => [s.invoiceNumber, fmtDate(s.invoiceDate), s.customer?.name || 'Walk-in', s.paymentMethod, s.netInvoiceAmount, s.paidAmount || 0, s.remainingBalance || 0]);
+      rows = filteredData.map((s) => [
+        s.invoiceNumber,
+        fmtDate(s.invoiceDate),
+        s.customer?.name || 'Walk-in',
+        (s.items || []).map((it: any) => `${it.item?.name || 'Item'}${it.enteredQuantity ? ` (${it.enteredQuantity} ${it.enteredUnitName || ''})` : ''}`).join(', ') || '—',
+        s.paymentMethod,
+        s.netInvoiceAmount,
+        s.paidAmount || 0,
+        s.remainingBalance || 0,
+      ]);
     } else if (selectedReport === 'sale_summary') {
       rows = filteredData.map((r) => [r.date, r.count, fmt(r.total), fmt(r.paid), fmt(r.baqi)]);
     } else if (selectedReport === 'purchase_register') {
-      rows = filteredData.map((p) => [p.invoiceNumber, fmtDate(p.invoiceDate), p.supplier?.name || '', p.paymentMethod, p.netLandedAmount, p.paidAmount || 0, p.remainingBalance || 0]);
+      rows = filteredData.map((p) => [
+        p.invoiceNumber,
+        fmtDate(p.invoiceDate),
+        p.supplier?.name || '',
+        (p.items || []).map((it: any) => `${it.item?.name || 'Item'}${it.enteredQuantity || it.quantity ? ` (${it.enteredQuantity || it.quantity} ${it.enteredUnitName || ''})` : ''}`).join(', ') || '—',
+        p.paymentMethod,
+        p.netLandedAmount,
+        p.paidAmount || 0,
+        p.remainingBalance || 0,
+      ]);
     } else if (selectedReport === 'purchase_summary') {
       rows = filteredData.map((r) => [r.name, r.phone, r.count, fmt(r.total), fmt(r.paid), fmt(r.baqi)]);
     } else if (selectedReport === 'customer_aging' || selectedReport === 'customer_list') {
@@ -600,11 +630,11 @@ export const ReportsPage: React.FC = () => {
 
     /* 4. LOW STOCK */
     if (selectedReport === 'low_stock') {
-      return filteredData.map((st) => (
-        <tr key={st.itemId} className="table-row">
-          <td className="table-td font-mono text-gray-500 text-[11px]">{st.itemCode}</td>
-          <td className="table-td font-medium text-gray-800">{st.itemName}</td>
-          <td className="table-td text-gray-500">{st.baseUnit}</td>
+      return filteredData.map((st, idx) => (
+        <tr key={String(st.itemId ?? idx)} className="table-row">
+          <td className="table-td font-mono text-gray-500 text-[11px]">{String(st.itemCode ?? '—')}</td>
+          <td className="table-td font-medium text-gray-800">{String(st.itemName ?? '—')}</td>
+          <td className="table-td text-gray-500">{typeof st.baseUnit === 'object' ? (st.baseUnit?.name ?? '—') : String(st.baseUnit ?? '—')}</td>
           <td className="table-td text-right font-mono font-bold text-rose-600">{fmt(st.totalPhysicalBaseQty)}</td>
           <td className="table-td text-center">
             <span
@@ -621,19 +651,25 @@ export const ReportsPage: React.FC = () => {
 
     /* 5. SALES */
     if (selectedReport === 'daily_sales' || selectedReport === 'unpaid_sales') {
-      return filteredData.map((s) => (
-        <tr key={s.id} className="table-row">
-          <td className="table-td font-mono font-bold text-brand-600 text-[11px]">{s.invoiceNumber}</td>
-          <td className="table-td text-gray-500 text-[11px]">{fmtDate(s.invoiceDate)}</td>
-          <td className="table-td text-gray-800 font-medium">{s.customer?.name || 'Walk-in'}</td>
-          <td className="table-td">
-            <span className="badge-blue text-[9px]">{s.paymentMethod}</span>
-          </td>
-          <td className="table-td text-right font-mono font-bold text-gray-900">Rs. {fmt(s.netInvoiceAmount)}</td>
-          <td className="table-td text-right font-mono text-emerald-600">Rs. {fmt(s.paidAmount)}</td>
-          <td className="table-td text-right font-mono text-rose-600 font-bold">Rs. {fmt(s.remainingBalance)}</td>
-        </tr>
-      ));
+      return filteredData.map((s) => {
+        const itemsText = (s.items || [])
+          .map((it: any) => `${it.item?.name || 'Item'}${it.enteredQuantity ? ` (${it.enteredQuantity} ${it.enteredUnitName || ''})` : ''}`)
+          .join(', ') || '—';
+        return (
+          <tr key={s.id} className="table-row">
+            <td className="table-td font-mono font-bold text-brand-600 text-[11px]">{s.invoiceNumber}</td>
+            <td className="table-td text-gray-500 text-[11px]">{fmtDate(s.invoiceDate)}</td>
+            <td className="table-td text-gray-800 font-medium">{s.customer?.name || 'Walk-in'}</td>
+            <td className="table-td text-gray-700 text-xs max-w-[240px]">{itemsText}</td>
+            <td className="table-td">
+              <span className="badge-blue text-[9px]">{s.paymentMethod}</span>
+            </td>
+            <td className="table-td text-right font-mono font-bold text-gray-900">Rs. {fmt(s.netInvoiceAmount)}</td>
+            <td className="table-td text-right font-mono text-emerald-600">Rs. {fmt(s.paidAmount)}</td>
+            <td className="table-td text-right font-mono text-rose-600 font-bold">Rs. {fmt(s.remainingBalance)}</td>
+          </tr>
+        );
+      });
     }
 
     /* 6. SALE SUMMARY */
@@ -651,19 +687,25 @@ export const ReportsPage: React.FC = () => {
 
     /* 7. PURCHASES */
     if (selectedReport === 'purchase_register') {
-      return filteredData.map((p) => (
-        <tr key={p.id} className="table-row">
-          <td className="table-td font-mono font-bold text-sky-600 text-[11px]">{p.invoiceNumber}</td>
-          <td className="table-td text-gray-500 text-[11px]">{fmtDate(p.invoiceDate)}</td>
-          <td className="table-td text-gray-800 font-medium">{p.supplier?.name || '—'}</td>
-          <td className="table-td">
-            <span className="badge-blue text-[9px]">{p.paymentMethod}</span>
-          </td>
-          <td className="table-td text-right font-mono font-bold text-gray-900">Rs. {fmt(p.netLandedAmount)}</td>
-          <td className="table-td text-right font-mono text-emerald-600">Rs. {fmt(p.paidAmount)}</td>
-          <td className="table-td text-right font-mono text-amber-600 font-bold">Rs. {fmt(p.remainingBalance)}</td>
-        </tr>
-      ));
+      return filteredData.map((p) => {
+        const itemsText = (p.items || [])
+          .map((it: any) => `${it.item?.name || 'Item'}${it.enteredQuantity || it.quantity ? ` (${it.enteredQuantity || it.quantity} ${it.enteredUnitName || ''})` : ''}`)
+          .join(', ') || '—';
+        return (
+          <tr key={p.id} className="table-row">
+            <td className="table-td font-mono font-bold text-sky-600 text-[11px]">{p.invoiceNumber}</td>
+            <td className="table-td text-gray-500 text-[11px]">{fmtDate(p.invoiceDate)}</td>
+            <td className="table-td text-gray-800 font-medium">{p.supplier?.name || '—'}</td>
+            <td className="table-td text-gray-700 text-xs max-w-[240px]">{itemsText}</td>
+            <td className="table-td">
+              <span className="badge-blue text-[9px]">{p.paymentMethod}</span>
+            </td>
+            <td className="table-td text-right font-mono font-bold text-gray-900">Rs. {fmt(p.netLandedAmount)}</td>
+            <td className="table-td text-right font-mono text-emerald-600">Rs. {fmt(p.paidAmount)}</td>
+            <td className="table-td text-right font-mono text-amber-600 font-bold">Rs. {fmt(p.remainingBalance)}</td>
+          </tr>
+        );
+      });
     }
 
     if (selectedReport === 'purchase_summary') {
