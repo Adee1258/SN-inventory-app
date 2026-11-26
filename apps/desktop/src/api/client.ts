@@ -17,7 +17,8 @@ function isElectronOrLocal(): boolean {
   );
 }
 
-let activeBackend: ActiveBackend = isElectronOrLocal() ? 'local' : 'cloud';
+// Always start with cloud; auto mode will probe and fallback to local if cloud unreachable
+let activeBackend: ActiveBackend = 'cloud';
 
 export function getApiMode(): ApiMode {
   if (typeof window !== 'undefined') {
@@ -26,7 +27,8 @@ export function getApiMode(): ApiMode {
       return saved;
     }
   }
-  return isElectronOrLocal() ? 'auto' : 'online';
+  // Default: always auto (cloud-first, fallback to local)
+  return 'auto';
 }
 
 export function setApiMode(mode: ApiMode): void {
