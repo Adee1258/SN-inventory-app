@@ -87,8 +87,8 @@ async function fetchWithTimeout(
 
 async function probeHealth(baseUrl: string, timeoutMs: number): Promise<boolean> {
   try {
-    const rootUrl = baseUrl.replace(/\/api\/v1\/?$/, '');
-    const res = await fetchWithTimeout(`${rootUrl}/health`, {}, timeoutMs);
+    const cleanBase = baseUrl.replace(/\/+$/, '');
+    const res = await fetchWithTimeout(`${cleanBase}/health`, {}, timeoutMs);
     if (!res.ok) return false;
     const data = await res.json();
     return Boolean(data.databaseConnected || data.status === 'OK');
@@ -99,7 +99,7 @@ async function probeHealth(baseUrl: string, timeoutMs: number): Promise<boolean>
 
 /**
  * Checks connectivity based on current ApiMode:
- * - 'auto': prefers Cloud (3s timeout); falls back to Local Server if Cloud is unreachable/slow.
+ * - 'auto': prefers Cloud (5s timeout); falls back to Local Server if Cloud is unreachable/slow.
  * - 'online': checks Cloud only.
  * - 'offline': checks Local Server only.
  */
@@ -117,12 +117,12 @@ export async function resolveBackendHealth(): Promise<{
 
   if (mode === 'online') {
     setActiveBackend('cloud');
-    const ok = await probeHealth(CLOUD_API_URL, 4000);
+    const ok = await probeHealth(CLOUD_API_URL, 6000);
     return { connected: ok, backend: 'cloud' };
   }
 
-  // Auto mode: try Cloud fast (3s), fallback to Local
-  const cloudOk = await probeHealth(CLOUD_API_URL, 3000);
+  // Auto mode: try Cloud (5s), fallback to Local
+  const cloudOk = await probeHealth(CLOUD_API_URL, 5000);
   if (cloudOk) {
     setActiveBackend('cloud');
     return { connected: true, backend: 'cloud' };

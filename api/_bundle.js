@@ -43574,7 +43574,7 @@ app.get("/", (_req, res) => {
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
 });
-app.get("/health", async (_req, res) => {
+var healthHandler = async (_req, res) => {
   const isDbConnected = await checkDatabaseConnection();
   return res.json({
     status: "OK",
@@ -43583,7 +43583,9 @@ app.get("/health", async (_req, res) => {
     databaseConnected: isDbConnected,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
-});
+};
+app.get("/health", healthHandler);
+app.get("/api/v1/health", healthHandler);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/items", itemRoutes);
 app.use("/api/v1/parties", partyRoutes);

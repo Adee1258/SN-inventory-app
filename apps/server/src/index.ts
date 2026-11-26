@@ -48,7 +48,7 @@ app.get('/', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/health', async (_req: Request, res: Response) => {
+const healthHandler = async (_req: Request, res: Response) => {
   const isDbConnected = await checkDatabaseConnection();
   return res.json({
     status: 'OK',
@@ -57,7 +57,10 @@ app.get('/health', async (_req: Request, res: Response) => {
     databaseConnected: isDbConnected,
     timestamp: new Date().toISOString(),
   });
-});
+};
+
+app.get('/health', healthHandler);
+app.get('/api/v1/health', healthHandler);
 
 // API Routes
 app.use('/api/v1/auth', authRoutes);

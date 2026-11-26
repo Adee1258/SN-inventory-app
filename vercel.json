@@ -15,6 +15,7 @@
     }
   ],
   "routes": [
+    { "src": "/health", "dest": "/api/index.js" },
     { "src": "/api/(.*)", "dest": "/api/index.js" },
     { "src": "/assets/(.*)", "dest": "/public/assets/$1" },
     { "src": "/favicon.ico", "dest": "/public/favicon.ico" },
