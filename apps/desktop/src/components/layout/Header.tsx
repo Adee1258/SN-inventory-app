@@ -1,5 +1,5 @@
 import React from 'react';
-import { Server, Wifi, WifiOff, LogOut } from 'lucide-react';
+import { Server, Wifi, WifiOff, LogOut, Upload, CheckCircle2 } from 'lucide-react';
 
 import type { ApiMode } from '../../api/client.js';
 
@@ -11,6 +11,7 @@ interface HeaderProps {
   onCycleApiMode?: () => void;
   username?: string;
   onLogout: () => void;
+  syncPending?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onCycleApiMode,
   username = 'Admin',
   onLogout,
+  syncPending = 0,
 }) => {
   const modeLabel =
     apiMode === 'auto'
@@ -74,6 +76,30 @@ export const Header: React.FC<HeaderProps> = ({
             : <WifiOff className="w-3 h-3 text-gray-500" />}
           <span>{modeLabel}</span>
         </button>
+
+        {/* Sync Badge — only show when on local backend */}
+        {!cloudSyncEnabled && (
+          <div
+            title={syncPending > 0 ? `${syncPending} record(s) pending upload to cloud` : 'All data synced to cloud'}
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold border ${
+              syncPending > 0
+                ? 'bg-amber-50 border-amber-300 text-amber-700'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            }`}
+          >
+            {syncPending > 0 ? (
+              <>
+                <Upload className="w-3 h-3" />
+                <span>{syncPending} pending</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-3 h-3" />
+                <span>Synced</span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Divider */}
         <div className="w-px h-5 bg-gray-200" />

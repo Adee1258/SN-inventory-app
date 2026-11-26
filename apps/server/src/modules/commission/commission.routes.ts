@@ -11,6 +11,7 @@ import {
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { calculateBaseQuantity, Decimal, toMoney, toQuantity } from '@erp/business-rules';
 import { createBalancedJournalEntry } from '../../accounting/posting-engine.js';
+import { writeOutbox, enrichConsignmentPayload } from '../../sync/outbox-writer.js';
 
 const router = Router();
 
@@ -171,6 +172,14 @@ router.post('/receipts', requireOwnerAuth, async (req: Request, res: Response) =
 
     return receipt;
   });
+
+  // Outbox: UUID-enriched payload for cloud sync (non-blocking)
+  enrichConsignmentPayload(validated).then((enriched) =>
+    writeOutbox('CONSIGNMENT_RECEIPT', result.id, 'CREATED', {
+      ...enriched,
+      _receiptNumber: result.receiptNumber,
+    })
+  ).catch(() => {/* non-critical */});
 
   return res.status(201).json({ success: true, data: result });
 });
@@ -1288,6 +1297,17 @@ router.post('/expenses', requireOwnerAuth, async (req: Request, res: Response) =
     }
     return list;
   });
+
+  // Outbox: write each expense (non-blocking)
+  for (const exp of created) {
+    writeOutbox('COMMISSION_EXPENSE', exp.id, 'CREATED', {
+      expenseDate: exp.expenseDate,
+      description: exp.description,
+      amount: exp.amount?.toString(),
+      category: exp.category,
+      notes: exp.notes,
+    }).catch(() => {/* non-critical */});
+  }
 
   const isBatch = Array.isArray(req.body) || Array.isArray(req.body?.expenses);
   return res.status(201).json({ success: true, data: isBatch ? created : created[0] });

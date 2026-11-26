@@ -4,6 +4,7 @@ import { ReceiptVoucherSchema, PaymentVoucherSchema } from '@erp/validation';
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { Decimal, toMoney } from '@erp/business-rules';
 import { createBalancedJournalEntry } from '../../accounting/posting-engine.js';
+import { writeOutbox } from '../../sync/outbox-writer.js';
 
 const router = Router();
 
@@ -187,6 +188,19 @@ router.post('/receipts', requireOwnerAuth, async (req: Request, res: Response) =
     return voucher;
   });
 
+  // Outbox: receipt voucher sync (non-blocking)
+  writeOutbox('RECEIPT_VOUCHER', result.id, 'CREATED', {
+    voucherNumber: result.voucherNumber,
+    voucherDate: result.voucherDate,
+    amount: result.amount?.toString(),
+    partyType: result.partyType,
+    partyId: result.partyId?.toString(),
+    narration: result.narration,
+    referenceNumber: result.referenceNumber,
+    cashBankAccountId: result.cashBankAccountId?.toString(),
+    creditAccountId: result.creditAccountId?.toString(),
+  }).catch(() => {/* non-critical */});
+
   return res.status(201).json({ success: true, data: result });
 });
 
@@ -366,6 +380,19 @@ router.post('/payments', requireOwnerAuth, async (req: Request, res: Response) =
 
     return voucher;
   });
+
+  // Outbox: payment voucher sync (non-blocking)
+  writeOutbox('PAYMENT_VOUCHER', result.id, 'CREATED', {
+    voucherNumber: result.voucherNumber,
+    voucherDate: result.voucherDate,
+    amount: result.amount?.toString(),
+    partyType: result.partyType,
+    partyId: result.partyId?.toString(),
+    narration: result.narration,
+    referenceNumber: result.referenceNumber,
+    cashBankAccountId: result.cashBankAccountId?.toString(),
+    debitAccountId: result.debitAccountId?.toString(),
+  }).catch(() => {/* non-critical */});
 
   return res.status(201).json({ success: true, data: result });
 });

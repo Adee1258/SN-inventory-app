@@ -2,6 +2,7 @@
 import { prisma, dbTx } from '../../database/prisma.js';
 import { SaleCreateSchema, SalesReturnCreateSchema } from '@erp/validation';
 import { requireDeviceOrOwnerAuth, type AuthenticatedRequest } from '../../middleware/auth.js';
+import { writeOutbox, enrichSalePayload } from '../../sync/outbox-writer.js';
 import {
   calculateBaseQuantity,
   allocateFifo,
@@ -472,22 +473,17 @@ router.post('/', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res
       });
     }
 
-    // Transactional Outbox Sync Event
-    await tx.syncOutbox.create({
-      data: {
-        aggregateType: 'SALE_INVOICE',
-        aggregateId: invoice.id,
-        eventType: 'SALE_POSTED',
-        payloadJson: JSON.stringify({
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          netAmount: formatMoney(invoiceNet),
-        }),
-      },
-    });
-
     return invoice;
   });
+
+  // Outbox: UUID-enriched payload for cloud sync (non-blocking)
+  enrichSalePayload(validated).then((enriched) =>
+    writeOutbox('SALE_INVOICE', result.id, 'CREATED', {
+      ...enriched,
+      _invoiceNumber: result.invoiceNumber,
+      _createdAt: result.invoiceDate,
+    })
+  ).catch(() => {/* non-critical */});
 
   return res.status(201).json({ success: true, data: result });
 });

@@ -21,6 +21,7 @@ import { voucherRoutes } from './modules/vouchers/vouchers.routes.js';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { startSyncWorker } from './sync/sync-worker.js';
+import { syncRoutes } from './modules/sync/sync.routes.js';
 
 const app = express();
 const helmet = (helmetPkg as any).default || helmetPkg;
@@ -71,6 +72,7 @@ app.use('/api/v1/accounting', accountingRoutes);
 app.use('/api/v1/vouchers', voucherRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/settings', settingsRoutes);
+app.use('/api/v1/sync', syncRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);

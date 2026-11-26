@@ -31,6 +31,7 @@ export function App() {
   const [isDbConnected, setIsDbConnected] = useState(true);
   const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode);
   const [activeBackend, setActiveBackendState] = useState<ActiveBackend>(getActiveBackend);
+  const [syncPending, setSyncPending] = useState<number>(0);
 
   const checkHealth = async () => {
     const result = await resolveBackendHealth();
@@ -49,6 +50,21 @@ export function App() {
   useEffect(() => {
     checkHealth();
     const interval = setInterval(checkHealth, 15000);
+
+    // Sync badge: poll local server for pending outbox count every 30s
+    const checkSyncStatus = async () => {
+      try {
+        const res = await fetch('http://127.0.0.1:4000/api/v1/sync/status');
+        if (res.ok) {
+          const data = await res.json();
+          setSyncPending(data.pendingCount ?? 0);
+        }
+      } catch {
+        // local server not running — ignore
+      }
+    };
+    checkSyncStatus();
+    const syncInterval = setInterval(checkSyncStatus, 30000);
 
     const onBackendChanged = (e: Event) => {
       const customEvent = e as CustomEvent<ActiveBackend>;
@@ -79,6 +95,7 @@ export function App() {
 
     return () => {
       clearInterval(interval);
+      clearInterval(syncInterval);
       window.removeEventListener('erp_backend_changed', onBackendChanged);
       window.removeEventListener('erp_api_mode_changed', onModeChanged);
       window.removeEventListener('erp_auth_expired', onAuthExpired);
@@ -155,6 +172,7 @@ export function App() {
           onCycleApiMode={handleCycleApiMode}
           username={username}
           onLogout={handleLogout}
+          syncPending={syncPending}
         />
 
         <main className="flex-1 overflow-hidden flex flex-col bg-gray-100">

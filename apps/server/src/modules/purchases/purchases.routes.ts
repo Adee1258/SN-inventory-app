@@ -4,6 +4,7 @@ import { PurchaseCreateSchema, PurchaseReturnCreateSchema } from '@erp/validatio
 import { requireOwnerAuth } from '../../middleware/auth.js';
 import { calculateBaseQuantity, Decimal, toMoney, toQuantity } from '@erp/business-rules';
 import { createBalancedJournalEntry } from '../../accounting/posting-engine.js';
+import { writeOutbox, enrichPurchasePayload } from '../../sync/outbox-writer.js';
 
 const router = Router();
 
@@ -266,18 +267,17 @@ router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
       lines: journalLines,
     });
 
-    // Outbox Sync Event
-    await tx.syncOutbox.create({
-      data: {
-        aggregateType: 'PURCHASE_INVOICE',
-        aggregateId: invoice.id,
-        eventType: 'PURCHASE_POSTED',
-        payloadJson: JSON.stringify({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber }),
-      },
-    });
-
     return invoice;
   });
+
+  // Outbox: UUID-enriched payload for cloud sync (non-blocking)
+  enrichPurchasePayload(validated).then((enriched) =>
+    writeOutbox('PURCHASE_INVOICE', result.id, 'CREATED', {
+      ...enriched,
+      _invoiceNumber: result.invoiceNumber,
+      _createdAt: result.invoiceDate,
+    })
+  ).catch(() => {/* non-critical */});
 
   return res.status(201).json({ success: true, data: result });
 });

@@ -1294,17 +1294,17 @@ var require_router = __commonJS({
     var toString = Object.prototype.toString;
     var proto = module2.exports = function(options) {
       var opts = options || {};
-      function router13(req, res, next) {
-        router13.handle(req, res, next);
+      function router14(req, res, next) {
+        router14.handle(req, res, next);
       }
-      setPrototypeOf(router13, proto);
-      router13.params = {};
-      router13._params = [];
-      router13.caseSensitive = opts.caseSensitive;
-      router13.mergeParams = opts.mergeParams;
-      router13.strict = opts.strict;
-      router13.stack = [];
-      return router13;
+      setPrototypeOf(router14, proto);
+      router14.params = {};
+      router14._params = [];
+      router14.caseSensitive = opts.caseSensitive;
+      router14.mergeParams = opts.mergeParams;
+      router14.strict = opts.strict;
+      router14.stack = [];
+      return router14;
     };
     proto.param = function param(name, fn) {
       if (typeof name === "function") {
@@ -22187,7 +22187,7 @@ var require_application = __commonJS({
   "node_modules/express/lib/application.js"(exports2, module2) {
     "use strict";
     var finalhandler = require_finalhandler();
-    var Router14 = require_router();
+    var Router15 = require_router();
     var methods = require_methods();
     var middleware = require_init();
     var query = require_query();
@@ -22252,7 +22252,7 @@ var require_application = __commonJS({
     };
     app2.lazyrouter = function lazyrouter() {
       if (!this._router) {
-        this._router = new Router14({
+        this._router = new Router15({
           caseSensitive: this.enabled("case sensitive routing"),
           strict: this.enabled("strict routing")
         });
@@ -22261,17 +22261,17 @@ var require_application = __commonJS({
       }
     };
     app2.handle = function handle(req, res, callback) {
-      var router13 = this._router;
+      var router14 = this._router;
       var done = callback || finalhandler(req, res, {
         env: this.get("env"),
         onerror: logerror.bind(this)
       });
-      if (!router13) {
+      if (!router14) {
         debug("no routes defined on app");
         done();
         return;
       }
-      router13.handle(req, res, done);
+      router14.handle(req, res, done);
     };
     app2.use = function use(fn) {
       var offset = 0;
@@ -22291,15 +22291,15 @@ var require_application = __commonJS({
         throw new TypeError("app.use() requires a middleware function");
       }
       this.lazyrouter();
-      var router13 = this._router;
+      var router14 = this._router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router13.use(path2, fn2);
+          return router14.use(path2, fn2);
         }
         debug(".use app under %s", path2);
         fn2.mountpath = path2;
         fn2.parent = this;
-        router13.use(path2, function mounted_app(req, res, next) {
+        router14.use(path2, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             setPrototypeOf(req, orig.request);
@@ -24115,7 +24115,7 @@ var require_express = __commonJS({
     var mixin = require_merge_descriptors();
     var proto = require_application();
     var Route = require_route();
-    var Router14 = require_router();
+    var Router15 = require_router();
     var req = require_request();
     var res = require_response();
     exports2 = module2.exports = createApplication;
@@ -24138,7 +24138,7 @@ var require_express = __commonJS({
     exports2.request = req;
     exports2.response = res;
     exports2.Route = Route;
-    exports2.Router = Router14;
+    exports2.Router = Router15;
     exports2.json = bodyParser.json;
     exports2.query = require_query();
     exports2.raw = bodyParser.raw;
@@ -29759,7 +29759,7 @@ Object.defineProperty(Layer.prototype, "handle", {
 patchRouterParam();
 
 // apps/server/src/index.ts
-var import_express13 = __toESM(require_express2());
+var import_express14 = __toESM(require_express2());
 var import_cors = __toESM(require_lib3());
 
 // node_modules/helmet/index.mjs
@@ -38984,6 +38984,150 @@ var inventoryRoutes = router5;
 
 // apps/server/src/modules/purchases/purchases.routes.ts
 var import_express6 = __toESM(require_express2());
+
+// apps/server/src/sync/outbox-writer.ts
+var isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+function safeJson(obj) {
+  return JSON.stringify(
+    obj,
+    (_, v) => typeof v === "bigint" ? v.toString() : v
+  );
+}
+async function writeOutbox(aggregateType, aggregateId, eventType, payload) {
+  if (isServerless) return;
+  try {
+    await prisma.syncOutbox.create({
+      data: {
+        aggregateType,
+        aggregateId,
+        eventType,
+        payloadJson: safeJson(payload)
+      }
+    });
+    console.log(`[Outbox] Queued: ${aggregateType} #${aggregateId} (${eventType})`);
+  } catch (err) {
+    console.error("[Outbox] Write failed (non-critical):", err);
+  }
+}
+async function enrichSalePayload(validated) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: BigInt(validated.customerId) },
+    select: { uuid: true, code: true, name: true }
+  });
+  const enrichedItems = await Promise.all(
+    validated.items.map(async (line) => {
+      const [item, unit] = await Promise.all([
+        prisma.item.findUnique({
+          where: { id: BigInt(line.itemId) },
+          select: { uuid: true, code: true, name: true }
+        }),
+        prisma.unit.findUnique({
+          where: { id: BigInt(line.unitId) },
+          select: { code: true, name: true }
+        })
+      ]);
+      let supplierUuid = null;
+      let supplierCode = null;
+      if (line.supplierId) {
+        const sup = await prisma.supplier.findUnique({
+          where: { id: BigInt(line.supplierId) },
+          select: { uuid: true, code: true }
+        });
+        supplierUuid = sup?.uuid ?? null;
+        supplierCode = sup?.code ?? null;
+      }
+      return {
+        ...line,
+        itemUuid: item?.uuid ?? null,
+        itemCode: item?.code ?? null,
+        itemName: item?.name ?? null,
+        unitCode: unit?.code ?? null,
+        unitName: unit?.name ?? null,
+        supplierUuid,
+        supplierCode
+      };
+    })
+  );
+  return {
+    ...validated,
+    customerUuid: customer?.uuid ?? null,
+    customerCode: customer?.code ?? null,
+    customerName: customer?.name ?? null,
+    items: enrichedItems
+  };
+}
+async function enrichPurchasePayload(validated) {
+  const supplier = await prisma.supplier.findUnique({
+    where: { id: BigInt(validated.supplierId) },
+    select: { uuid: true, code: true, name: true }
+  });
+  const enrichedItems = await Promise.all(
+    validated.items.map(async (line) => {
+      const [item, unit] = await Promise.all([
+        prisma.item.findUnique({
+          where: { id: BigInt(line.itemId) },
+          select: { uuid: true, code: true, name: true }
+        }),
+        prisma.unit.findUnique({
+          where: { id: BigInt(line.unitId) },
+          select: { code: true, name: true }
+        })
+      ]);
+      return {
+        ...line,
+        itemUuid: item?.uuid ?? null,
+        itemCode: item?.code ?? null,
+        itemName: item?.name ?? null,
+        unitCode: unit?.code ?? null,
+        unitName: unit?.name ?? null
+      };
+    })
+  );
+  return {
+    ...validated,
+    supplierUuid: supplier?.uuid ?? null,
+    supplierCode: supplier?.code ?? null,
+    supplierName: supplier?.name ?? null,
+    items: enrichedItems
+  };
+}
+async function enrichConsignmentPayload(validated) {
+  const supplier = await prisma.supplier.findUnique({
+    where: { id: BigInt(validated.supplierId) },
+    select: { uuid: true, code: true, name: true }
+  });
+  const enrichedItems = await Promise.all(
+    validated.items.map(async (line) => {
+      const [item, unit] = await Promise.all([
+        prisma.item.findUnique({
+          where: { id: BigInt(line.itemId) },
+          select: { uuid: true, code: true, name: true }
+        }),
+        prisma.unit.findUnique({
+          where: { id: BigInt(line.unitId) },
+          select: { code: true, name: true }
+        })
+      ]);
+      return {
+        ...line,
+        itemUuid: item?.uuid ?? null,
+        itemCode: item?.code ?? null,
+        itemName: item?.name ?? null,
+        unitCode: unit?.code ?? null,
+        unitName: unit?.name ?? null
+      };
+    })
+  );
+  return {
+    ...validated,
+    supplierUuid: supplier?.uuid ?? null,
+    supplierCode: supplier?.code ?? null,
+    supplierName: supplier?.name ?? null,
+    items: enrichedItems
+  };
+}
+
+// apps/server/src/modules/purchases/purchases.routes.ts
 var router6 = (0, import_express6.Router)();
 router6.get("/", async (_req, res) => {
   const purchases = await prisma.purchaseInvoice.findMany({
@@ -39202,15 +39346,15 @@ router6.post("/", requireOwnerAuth, async (req, res) => {
       narration: `Purchase invoice from ${supplier.name}`,
       lines: journalLines
     });
-    await tx.syncOutbox.create({
-      data: {
-        aggregateType: "PURCHASE_INVOICE",
-        aggregateId: invoice.id,
-        eventType: "PURCHASE_POSTED",
-        payloadJson: JSON.stringify({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber })
-      }
-    });
     return invoice;
+  });
+  enrichPurchasePayload(validated).then(
+    (enriched) => writeOutbox("PURCHASE_INVOICE", result.id, "CREATED", {
+      ...enriched,
+      _invoiceNumber: result.invoiceNumber,
+      _createdAt: result.invoiceDate
+    })
+  ).catch(() => {
   });
   return res.status(201).json({ success: true, data: result });
 });
@@ -39622,6 +39766,13 @@ router7.post("/receipts", requireOwnerAuth, async (req, res) => {
       });
     }
     return receipt;
+  });
+  enrichConsignmentPayload(validated).then(
+    (enriched) => writeOutbox("CONSIGNMENT_RECEIPT", result.id, "CREATED", {
+      ...enriched,
+      _receiptNumber: result.receiptNumber
+    })
+  ).catch(() => {
   });
   return res.status(201).json({ success: true, data: result });
 });
@@ -40515,6 +40666,16 @@ router7.post("/expenses", requireOwnerAuth, async (req, res) => {
     }
     return list;
   });
+  for (const exp2 of created) {
+    writeOutbox("COMMISSION_EXPENSE", exp2.id, "CREATED", {
+      expenseDate: exp2.expenseDate,
+      description: exp2.description,
+      amount: exp2.amount?.toString(),
+      category: exp2.category,
+      notes: exp2.notes
+    }).catch(() => {
+    });
+  }
   const isBatch = Array.isArray(req.body) || Array.isArray(req.body?.expenses);
   return res.status(201).json({ success: true, data: isBatch ? created : created[0] });
 });
@@ -41213,19 +41374,15 @@ router8.post("/", requireDeviceOrOwnerAuth, async (req, res) => {
         ]
       });
     }
-    await tx.syncOutbox.create({
-      data: {
-        aggregateType: "SALE_INVOICE",
-        aggregateId: invoice.id,
-        eventType: "SALE_POSTED",
-        payloadJson: JSON.stringify({
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          netAmount: formatMoney(invoiceNet)
-        })
-      }
-    });
     return invoice;
+  });
+  enrichSalePayload(validated).then(
+    (enriched) => writeOutbox("SALE_INVOICE", result.id, "CREATED", {
+      ...enriched,
+      _invoiceNumber: result.invoiceNumber,
+      _createdAt: result.invoiceDate
+    })
+  ).catch(() => {
   });
   return res.status(201).json({ success: true, data: result });
 });
@@ -42693,6 +42850,18 @@ router10.post("/receipts", requireOwnerAuth, async (req, res) => {
     });
     return voucher;
   });
+  writeOutbox("RECEIPT_VOUCHER", result.id, "CREATED", {
+    voucherNumber: result.voucherNumber,
+    voucherDate: result.voucherDate,
+    amount: result.amount?.toString(),
+    partyType: result.partyType,
+    partyId: result.partyId?.toString(),
+    narration: result.narration,
+    referenceNumber: result.referenceNumber,
+    cashBankAccountId: result.cashBankAccountId?.toString(),
+    creditAccountId: result.creditAccountId?.toString()
+  }).catch(() => {
+  });
   return res.status(201).json({ success: true, data: result });
 });
 router10.get("/payments", async (_req, res) => {
@@ -42842,6 +43011,18 @@ router10.post("/payments", requireOwnerAuth, async (req, res) => {
       ]
     });
     return voucher;
+  });
+  writeOutbox("PAYMENT_VOUCHER", result.id, "CREATED", {
+    voucherNumber: result.voucherNumber,
+    voucherDate: result.voucherDate,
+    amount: result.amount?.toString(),
+    partyType: result.partyType,
+    partyId: result.partyId?.toString(),
+    narration: result.narration,
+    referenceNumber: result.referenceNumber,
+    cashBankAccountId: result.cashBankAccountId?.toString(),
+    debitAccountId: result.debitAccountId?.toString()
+  }).catch(() => {
   });
   return res.status(201).json({ success: true, data: result });
 });
@@ -43305,13 +43486,81 @@ function startSyncWorker(intervalMs = 15e3) {
   }, intervalMs);
 }
 
+// apps/server/src/modules/sync/sync.routes.ts
+var import_express13 = __toESM(require_express2());
+var router13 = (0, import_express13.Router)();
+router13.post("/push", async (req, res) => {
+  const { batch } = req.body;
+  if (!Array.isArray(batch) || batch.length === 0) {
+    return res.status(400).json({ success: false, message: "Batch array required" });
+  }
+  const acknowledgedUuids = [];
+  for (const record of batch) {
+    try {
+      const existing = await prisma.syncInbox.findUnique({
+        where: { uuid: record.uuid }
+      });
+      if (existing) {
+        acknowledgedUuids.push(record.uuid);
+        continue;
+      }
+      await prisma.syncInbox.create({
+        data: {
+          uuid: record.uuid,
+          aggregateType: record.aggregateType,
+          aggregateId: BigInt(record.aggregateId),
+          eventType: record.eventType,
+          payloadJson: JSON.stringify(record.payload)
+        }
+      });
+      acknowledgedUuids.push(record.uuid);
+      await prisma.syncLog.create({
+        data: {
+          batchSize: 1,
+          status: "RECEIVED",
+          responseCode: 200,
+          latencyMs: 0,
+          details: `Received ${record.aggregateType} #${record.aggregateId} (${record.eventType})`
+        }
+      });
+    } catch (err) {
+      console.error(`[SyncPush] Failed to process record ${record.uuid}:`, err);
+    }
+  }
+  return res.json({
+    success: true,
+    acknowledgedUuids,
+    received: batch.length,
+    acknowledged: acknowledgedUuids.length
+  });
+});
+router13.get("/status", async (_req, res) => {
+  const [pendingCount, acknowledgedCount, failedCount, lastLog] = await Promise.all([
+    prisma.syncOutbox.count({ where: { status: "PENDING" } }),
+    prisma.syncOutbox.count({ where: { status: "ACKNOWLEDGED" } }),
+    prisma.syncOutbox.count({ where: { status: "FAILED" } }),
+    prisma.syncLog.findFirst({ orderBy: { createdAt: "desc" } })
+  ]);
+  return res.json({
+    success: true,
+    data: {
+      pendingCount,
+      acknowledgedCount,
+      failedCount,
+      lastSyncAt: lastLog?.createdAt ?? null,
+      lastSyncStatus: lastLog?.status ?? null
+    }
+  });
+});
+var syncRoutes = router13;
+
 // apps/server/src/index.ts
-var app = (0, import_express13.default)();
+var app = (0, import_express14.default)();
 var helmet3 = helmet.default || helmet;
 app.use(helmet3({ contentSecurityPolicy: false }));
 app.use((0, import_cors.default)({ origin: "*" }));
-app.use(import_express13.default.json({ limit: "10mb" }));
-app.use(import_express13.default.urlencoded({ extended: true }));
+app.use(import_express14.default.json({ limit: "10mb" }));
+app.use(import_express14.default.urlencoded({ extended: true }));
 if (ENV.NODE_ENV !== "test") {
   app.use((0, import_morgan.default)("dev"));
 }
@@ -43347,9 +43596,10 @@ app.use("/api/v1/accounting", accountingRoutes);
 app.use("/api/v1/vouchers", voucherRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/settings", settingsRoutes);
+app.use("/api/v1/sync", syncRoutes);
 app.use(errorHandler);
-var isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
-if (process.env.NODE_ENV !== "test" && !isServerless) {
+var isServerless2 = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+if (process.env.NODE_ENV !== "test" && !isServerless2) {
   app.listen(ENV.PORT, ENV.API_HOST, async () => {
     console.log(`=======================================================`);
     console.log(` Wholesale / Ghalla Mandi ERP Local API Server Started`);
