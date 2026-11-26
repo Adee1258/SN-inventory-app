@@ -63,6 +63,15 @@ async function startLocalServer(): Promise<void> {
     console.log('[LocalServer] exited with code:', code);
     serverProcess = null;
   });
+
+  // Wait for local server to be ready before opening window (avoids ERR_CONNECTION_REFUSED on startup)
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline && serverProcess) {
+    if (await isLocalServerRunning()) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 function stopLocalServer(): void {

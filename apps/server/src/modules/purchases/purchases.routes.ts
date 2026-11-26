@@ -19,23 +19,6 @@ router.get('/', async (_req: Request, res: Response) => {
   return res.json({ success: true, data: purchases });
 });
 
-// Get Single Purchase Invoice
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
-    const invoice = await prisma.purchaseInvoice.findUnique({
-      where: { id: BigInt(req.params.id) },
-      include: {
-        supplier: true,
-        items: { include: { item: true } },
-      },
-    });
-    if (!invoice) return res.status(404).json({ success: false, message: 'Purchase invoice not found' });
-    return res.json({ success: true, data: invoice });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: 'Failed to fetch purchase invoice' });
-  }
-});
-
 // Create Own-Stock Purchase Invoice
 router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
   const validated = PurchaseCreateSchema.parse(req.body);
@@ -210,15 +193,22 @@ router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
     }
 
     // Update Cash/Bank Account if paid
+    let usedCashAccount: { id: bigint; accountType: string } | null = null;
     if (paidAmountDec.greaterThan(0)) {
-      let cashId = validated.cashBankAccountId ? BigInt(validated.cashBankAccountId) : null;
-      if (!cashId) {
-        const defaultCash = await tx.cashBankAccount.findFirst();
-        if (defaultCash) cashId = defaultCash.id;
+      if (validated.cashBankAccountId) {
+        usedCashAccount = await tx.cashBankAccount.findUnique({
+          where: { id: BigInt(validated.cashBankAccountId) },
+          select: { id: true, accountType: true },
+        });
       }
-      if (cashId) {
+      if (!usedCashAccount) {
+        usedCashAccount = await tx.cashBankAccount.findFirst({
+          select: { id: true, accountType: true },
+        });
+      }
+      if (usedCashAccount) {
         await tx.cashBankAccount.update({
-          where: { id: cashId },
+          where: { id: usedCashAccount.id },
           data: { currentBalance: { decrement: paidAmountDec } },
         });
       }
@@ -248,7 +238,7 @@ router.post('/', requireOwnerAuth, async (req: Request, res: Response) => {
 
     if (paidAmountDec.greaterThan(0)) {
       journalLines.push({
-        accountCode: '1010',
+        accountCode: usedCashAccount?.accountType === 'BANK' ? '1011' : '1010',
         debit: new Decimal(0),
         credit: paidAmountDec,
         description: `Payment for purchase ${invoice.invoiceNumber}`,
@@ -515,23 +505,37 @@ router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Revert Cash/Bank Account if cash was paid
+    // 2. Find Journal Entries linked to this purchase (before deleting, so we know which Cash/Bank account was used)
+    const journals = await tx.journalEntry.findMany({
+      where: { referenceType: 'PURCHASE_INVOICE', referenceId: invoice.id },
+      include: { lines: { select: { accountId: true, credit: true } } },
+    });
+
+    // 3. Revert exact Cash/Bank Account if cash was paid
     if (new Decimal(invoice.paidAmount).greaterThan(0)) {
-      // Find cash account used if any
-      const cashAcct = await tx.cashBankAccount.findFirst();
-      if (cashAcct) {
+      const allCashAccts = await tx.cashBankAccount.findMany();
+      const cashGlMap = new Map(allCashAccts.map((a) => [a.glAccountId.toString(), a]));
+      let targetCashAcct = null;
+      for (const j of journals) {
+        for (const l of j.lines) {
+          if (new Decimal(l.credit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+            targetCashAcct = cashGlMap.get(l.accountId.toString())!;
+            break;
+          }
+        }
+        if (targetCashAcct) break;
+      }
+      if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+
+      if (targetCashAcct) {
         await tx.cashBankAccount.update({
-          where: { id: cashAcct.id },
+          where: { id: targetCashAcct.id },
           data: { currentBalance: { increment: invoice.paidAmount } },
         });
       }
     }
 
-    // 3. Delete Journal Entries linked to this purchase
-    const journals = await tx.journalEntry.findMany({
-      where: { referenceType: 'PURCHASE_INVOICE', referenceId: invoice.id },
-      select: { id: true },
-    });
+    // 4. Delete Journal Entries linked to this purchase
     for (const j of journals) {
       await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
       await tx.journalEntry.delete({ where: { id: j.id } });
@@ -595,6 +599,23 @@ router.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   });
 
   return res.json({ success: true, data: result });
+});
+
+// Get Single Purchase Invoice (placed after static routes like /returns)
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const invoice = await prisma.purchaseInvoice.findUnique({
+      where: { id: BigInt(req.params.id) },
+      include: {
+        supplier: true,
+        items: { include: { item: true } },
+      },
+    });
+    if (!invoice) return res.status(404).json({ success: false, message: 'Purchase invoice not found' });
+    return res.json({ success: true, data: invoice });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch purchase invoice' });
+  }
 });
 
 export const purchaseRoutes = router;

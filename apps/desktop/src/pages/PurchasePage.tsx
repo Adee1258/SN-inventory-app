@@ -936,10 +936,11 @@ export const PurchasePage: React.FC = () => {
           </div>
 
           {lines.map((line, idx) => {
-            // Bug #4 Fix: Purchase should ONLY show own-stock items — exclude commission/consignment items
+            // Bug #4 Fix: Purchase should ONLY show own-stock items — exclude pure commission/consignment items
             const ownStockItems = allItems.filter((i: any) => {
               const catName = (i.category?.name || '').toLowerCase();
-              return !catName.includes('consign') && !catName.includes('commis');
+              const hasOwnStock = parseFloat(i.ownStockRemaining || '0') > 0;
+              return hasOwnStock || (!catName.includes('consign') && !catName.includes('commis'));
             });
             const filteredPool = line.itemName
               ? ownStockItems.filter((i) => i.name.toLowerCase().includes(line.itemName.toLowerCase()))

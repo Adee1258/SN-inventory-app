@@ -786,10 +786,11 @@ export const SalePage: React.FC = () => {
                 noStockWarning = !poolLoading && commissionStock[line.supplierId] !== undefined && itemPool.length === 0;
               }
             } else {
-              // Bug #3 Fix: Own Stock tab should ONLY show own-stock items (not commission/consignment items)
+              // Bug #3 Fix: Own Stock tab should ONLY show own-stock items (not pure commission/consignment items)
               itemPool = allItems.filter((i: any) => {
                 const catName = (i.category?.name || '').toLowerCase();
-                return !catName.includes('consign') && !catName.includes('commis');
+                const hasOwnStock = parseFloat(i.ownStockRemaining || '0') > 0;
+                return hasOwnStock || (!catName.includes('consign') && !catName.includes('commis'));
               });
             }
 

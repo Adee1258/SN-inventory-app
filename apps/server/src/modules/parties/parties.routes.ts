@@ -820,16 +820,44 @@ router.post('/recalculate', requireOwnerAuth, async (_req: Request, res: Respons
         new Decimal(0)
       );
 
-      // Settlements paid to consignment supplier
-      const settlements = await tx.supplierSettlement.findMany({
-        where: { supplierId: supp.id },
-        select: { netPaidAmount: true },
-      });
+      // Settlements, Payment Vouchers (2020), Receipt Vouchers (2020), & Supplier Expenses
+      const [settlements, consCoa, supExpenses] = await Promise.all([
+        tx.supplierSettlement.findMany({
+          where: { supplierId: supp.id },
+          select: { netPaidAmount: true },
+        }),
+        tx.chartOfAccounts.findUnique({ where: { accountCode: '2020' }, select: { id: true } }),
+        tx.commissionExpense.findMany({
+          where: { notes: { contains: `SUPPLIER_ID:${supp.id}` } },
+          select: { amount: true },
+        }),
+      ]);
       const settlementTotal = settlements.reduce(
         (acc: Decimal, s: { netPaidAmount: Decimal | string }) =>
           acc.plus(new Decimal(s.netPaidAmount.toString())),
         new Decimal(0)
       );
+      const supExpenseTotal = supExpenses.reduce(
+        (acc: Decimal, e: { amount: Decimal | string }) => acc.plus(new Decimal(e.amount.toString())),
+        new Decimal(0)
+      );
+
+      let consVoucherPaid = new Decimal(0);
+      let consVoucherRefund = new Decimal(0);
+      if (consCoa) {
+        const [pvs, rvs] = await Promise.all([
+          tx.paymentVoucher.findMany({
+            where: { partyType: 'SUPPLIER', partyId: supp.id, debitAccountId: consCoa.id },
+            select: { amount: true },
+          }),
+          tx.receiptVoucher.findMany({
+            where: { partyType: 'SUPPLIER', partyId: supp.id, creditAccountId: consCoa.id },
+            select: { amount: true },
+          }),
+        ]);
+        consVoucherPaid = pvs.reduce((acc, p) => acc.plus(new Decimal(p.amount.toString())), new Decimal(0));
+        consVoucherRefund = rvs.reduce((acc, r) => acc.plus(new Decimal(r.amount.toString())), new Decimal(0));
+      }
 
       // If supplier has no surviving purchases or raw stock, reset own AP to 0
       const newBalanceOwn =
@@ -838,11 +866,14 @@ router.post('/recalculate', requireOwnerAuth, async (_req: Request, res: Respons
           : new Decimal(supp.openingBalanceOwn.toString()).plus(purchaseRemaining).plus(rawCreditTotal);
 
       const newBalanceCons =
-        consignmentSales.length === 0
+        consignmentSales.length === 0 && supExpenses.length === 0
           ? new Decimal(0)
           : new Decimal(supp.openingBalanceConsignment.toString())
               .plus(consignmentPayableTotal)
-              .minus(settlementTotal);
+              .minus(supExpenseTotal)
+              .minus(settlementTotal)
+              .minus(consVoucherPaid)
+              .plus(consVoucherRefund);
 
       await tx.supplier.update({
         where: { id: supp.id },

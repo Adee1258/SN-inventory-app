@@ -956,13 +956,42 @@ export const AccountsPage: React.FC = () => {
     });
   };
 
+  /* ── Helper: check if a Journal Entry belongs to Commission / Amanat ── */
+  const isCommissionJournal = React.useCallback((j: any) => {
+    const commTypes = [
+      'CONSIGNMENT_RECEIPT',
+      'CONSIGNMENT_RETURN',
+      'SUPPLIER_SETTLEMENT',
+      'SUPPLIER_ADVANCE',
+      'COMMISSION_EXPENSE',
+    ];
+    const nar = (j.narration || '').toLowerCase();
+    const hasCommLine = (j.lines || []).some((l: any) =>
+      isCommissionAccount(l.account || { accountCode: l.accountCode, accountName: l.accountName })
+    );
+    return (
+      commTypes.includes(j.referenceType) ||
+      nar.includes('commission') ||
+      nar.includes('consignment') ||
+      nar.includes('amanat') ||
+      nar.includes('settlement') ||
+      hasCommLine
+    );
+  }, []);
+
   /* ── Segment Counts for Buttons ── */
   const segmentCounts = React.useMemo(() => {
-    const allList = [...receipts, ...payments];
-    const comm = allList.filter(isCommissionVoucher).length;
-    const own = allList.length - comm;
-    return { all: allList.length, own, comm };
-  }, [receipts, payments, suppliers]);
+    const allVouchers = [...receipts, ...payments];
+    const commVouchers = allVouchers.filter(isCommissionVoucher).length;
+    const ownVouchers = allVouchers.length - commVouchers;
+
+    const commJournals = journals.filter(isCommissionJournal).length;
+    const ownJournals = journals.length - commJournals;
+
+    const comm = commVouchers + commJournals;
+    const own = ownVouchers + ownJournals;
+    return { all: allVouchers.length + journals.length, own, comm };
+  }, [receipts, payments, journals, suppliers, isCommissionJournal]);
 
   /* ── Combined Cash Book Data ── */
   const combinedCashBook = React.useMemo(() => {
@@ -1030,14 +1059,7 @@ export const AccountsPage: React.FC = () => {
       const inDate = (!dateFilter.start || d >= dateFilter.start) && (!dateFilter.end || d <= dateFilter.end);
       if (!inDate) return false;
 
-      // Segment classification: Check direct ref type or commission narration keywords
-      const nar = (j.narration || '').toLowerCase();
-      const isCommEntry =
-        commTypes.includes(j.referenceType) ||
-        nar.includes('commission') ||
-        nar.includes('consignment') ||
-        nar.includes('amanat') ||
-        nar.includes('settlement');
+      const isCommEntry = isCommissionJournal(j);
 
       if (businessSegment === 'CONSIGNMENT' && !isCommEntry) return false;
       if (businessSegment === 'OWN' && isCommEntry) return false;
@@ -1050,7 +1072,7 @@ export const AccountsPage: React.FC = () => {
         (j.referenceNumber || '').toLowerCase().includes(q)
       );
     });
-  }, [journals, dateFilter, searchQuery, businessSegment]);
+  }, [journals, dateFilter, searchQuery, businessSegment, isCommissionJournal]);
 
   /* ── Trial Balance 2-Column Split Data ── */
   const tbDataFiltered = React.useMemo(() => {

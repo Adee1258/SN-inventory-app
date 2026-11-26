@@ -386,7 +386,7 @@ router.delete('/receipts/:id', requireOwnerAuth, async (req: Request, res: Respo
       data: { currentBalance: { decrement: voucher.amount } },
     });
 
-    // 2. Revert Customer or Employee Balance if receipt
+    // 2. Revert Customer, Supplier or Employee Balance if receipt
     if (voucher.partyType === 'CUSTOMER' && voucher.partyId) {
       const cust = await tx.customer.findUnique({ where: { id: voucher.partyId } });
       if (cust) {
@@ -394,6 +394,22 @@ router.delete('/receipts/:id', requireOwnerAuth, async (req: Request, res: Respo
           where: { id: voucher.partyId },
           data: { currentBalance: { increment: voucher.amount } },
         });
+      }
+    } else if (voucher.partyType === 'SUPPLIER' && voucher.partyId) {
+      const supp = await tx.supplier.findUnique({ where: { id: voucher.partyId } });
+      if (supp) {
+        const creditAcc = await tx.chartOfAccounts.findUnique({ where: { id: voucher.creditAccountId } });
+        if (creditAcc?.accountCode === '2020') {
+          await tx.supplier.update({
+            where: { id: voucher.partyId },
+            data: { currentBalanceConsignment: { decrement: voucher.amount } },
+          });
+        } else if (creditAcc?.accountCode === '2010') {
+          await tx.supplier.update({
+            where: { id: voucher.partyId },
+            data: { currentBalanceOwn: { decrement: voucher.amount } },
+          });
+        }
       }
     } else if (voucher.partyType === 'EMPLOYEE' && voucher.partyId) {
       const emp = await tx.employee.findUnique({ where: { id: voucher.partyId } });

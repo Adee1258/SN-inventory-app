@@ -589,8 +589,8 @@ export const CommissionPage: React.FC = () => {
         {/* Global summary badge */}
         {summary && (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3.5 py-1.5 rounded-xl shadow-xs">
-            <span className="text-xs text-green-800 font-medium">Net Commission:</span>
-            <span className="text-sm font-mono font-bold text-green-700">{rs(summary.netCommission)}</span>
+            <span className="text-xs text-green-800 font-medium">Total Commission:</span>
+            <span className="text-sm font-mono font-bold text-green-700">{rs(summary.totalCommissionEarned)}</span>
           </div>
         )}
       </div>
@@ -1235,7 +1235,7 @@ export const CommissionPage: React.FC = () => {
                             </div>
 
                             <div className="p-2.5 rounded-lg bg-orange-50 border border-orange-100">
-                              <p className="text-[11px] text-orange-700">Kharche (Bilti wagera)</p>
+                              <p className="text-[11px] text-orange-700">Minus: Kharche (Supplier)</p>
                               <p className="text-sm font-bold text-orange-800 font-mono mt-0.5">
                                 {rs(s.totalSupplierExpenses || '0')}
                               </p>
@@ -1907,39 +1907,35 @@ export const CommissionPage: React.FC = () => {
                 <div className="card p-6 border-2 border-green-300 bg-white rounded-2xl shadow-sm space-y-4">
                   <h3 className="section-title text-lg font-bold text-gray-900 flex items-center gap-2 border-b border-gray-100 pb-3">
                     <Wallet className="w-5 h-5 text-green-600" />
-                    Apni Net Commission Calculation
+                    Apni Commission Calculation (Poori)
                   </h3>
 
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                      <span className="text-gray-600">Total Commission Earned:</span>
-                      <span className="font-mono font-bold text-green-700 text-base">
-                        + {rs(activeSummary.commissionEarned)}
+                      <span className="text-gray-600">Total Sale Amount:</span>
+                      <span className="font-mono font-bold text-gray-800 text-base">
+                        {rs(activeSummary.soldAmount)}
                       </span>
                     </div>
 
                     <div className="flex justify-between items-center py-2 border-b border-gray-100">
                       <span className="text-gray-600">
-                        Minus: {activeSummary.isAll ? 'Tamam Kharche' : `${activeSummary.supplierName} Ke Kharche`}:
+                        Kharche ({activeSummary.isAll ? 'Tamam Suppliers' : activeSummary.supplierName} ke balance se katay):
                       </span>
-                      <span className="font-mono font-bold text-red-600 text-base">
-                        − {rs(activeSummary.expenses)}
+                      <span className="font-mono font-bold text-orange-600 text-base">
+                        {rs(activeSummary.expenses)} (Supplier Pay)
                       </span>
                     </div>
 
                     <div className="flex justify-between items-center p-4 bg-green-50/90 border border-green-300 rounded-xl mt-3">
                       <div>
-                        <span className="font-bold text-gray-900 text-base block">Apni Net Commission</span>
+                        <span className="font-bold text-gray-900 text-base block">Apni Poori Commission</span>
                         <span className="text-xs text-green-700">
-                          {activeSummary.isAll
-                            ? 'Tamam kharche nikaal ke bachi hui raqam'
-                            : `Is supplier se bachi hui net commission`}
+                          Kharche supplier ke hisaab se kat&apos;te hain — aap ki commission poori hai
                         </span>
                       </div>
-                      <span className={`font-mono font-bold text-2xl ${
-                        parseFloat(activeSummary.netCommission) >= 0 ? 'text-green-700' : 'text-red-600'
-                      }`}>
-                        {rs(activeSummary.netCommission)} ✅
+                      <span className="font-mono font-bold text-2xl text-green-700">
+                        {rs(activeSummary.commissionEarned)} ✅
                       </span>
                     </div>
                   </div>
@@ -1959,14 +1955,19 @@ export const CommissionPage: React.FC = () => {
                     </div>
 
                     <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                      <span className="text-gray-600">Diya Gaya (Settled Payouts):</span>
-                      <span className="font-mono font-bold text-purple-700">{rs(activeSummary.settled)}</span>
+                      <span className="text-gray-600">Minus: Kharche (Bilti / Labour wagera):</span>
+                      <span className="font-mono font-bold text-red-600">− {rs(activeSummary.expenses)}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Minus: Diya Gaya (Settled / Paid):</span>
+                      <span className="font-mono font-bold text-purple-700">− {rs(activeSummary.settled)}</span>
                     </div>
 
                     <div className="flex justify-between items-center p-4 bg-purple-50 border border-purple-200 rounded-xl mt-3">
                       <div>
                         <span className="font-bold text-gray-900 text-base block">Abhi Tak Kitna Baqi Hai</span>
-                        <span className="text-xs text-purple-700">Supplier ka dena baqi balance</span>
+                        <span className="text-xs text-purple-700">Kharche aur adaigi kaat kar supplier ka baqi balance</span>
                       </div>
                       <span className="font-mono font-bold text-2xl text-purple-800">
                         {rs(activeSummary.pendingPayable)}

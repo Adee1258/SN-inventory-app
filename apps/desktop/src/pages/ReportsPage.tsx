@@ -408,7 +408,7 @@ export const ReportsPage: React.FC = () => {
             totalSale: s.totalSoldAmount || s.totalSaleValue || '0.00',
             commissionEarned: s.totalCommissionEarned || s.totalCommission || '0.00',
             kharche: s.totalSupplierExpenses || s.totalExpenses || '0.00',
-            netCommission: s.netCommissionFromSupplier || (parseFloat(s.totalCommission || 0) - parseFloat(s.totalExpenses || 0)).toFixed(2),
+            netCommission: s.netCommissionFromSupplier || s.totalCommissionEarned || s.totalCommission || '0.00',
             diyaGaya: s.totalSettled || '0.00',
             baqiDena: s.currentBalanceConsignment || s.remainingPayable || '0.00',
           }));

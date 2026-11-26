@@ -313,15 +313,22 @@ router.post('/', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res
     }
 
     // Update Cash/Bank Account if cash paid at counter
+    let usedCashAccount: { id: bigint; accountType: string } | null = null;
     if (paidAmountDec.greaterThan(0)) {
-      let cashId = validated.cashBankAccountId ? BigInt(validated.cashBankAccountId) : null;
-      if (!cashId) {
-        const defaultCash = await tx.cashBankAccount.findFirst();
-        if (defaultCash) cashId = defaultCash.id;
+      if (validated.cashBankAccountId) {
+        usedCashAccount = await tx.cashBankAccount.findUnique({
+          where: { id: BigInt(validated.cashBankAccountId) },
+          select: { id: true, accountType: true },
+        });
       }
-      if (cashId) {
+      if (!usedCashAccount) {
+        usedCashAccount = await tx.cashBankAccount.findFirst({
+          select: { id: true, accountType: true },
+        });
+      }
+      if (usedCashAccount) {
         await tx.cashBankAccount.update({
-          where: { id: cashId },
+          where: { id: usedCashAccount.id },
           data: { currentBalance: { increment: paidAmountDec } },
         });
       }
@@ -448,7 +455,7 @@ router.post('/', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest, res
           : `Counter collection for sale invoice ${invoice.invoiceNumber}`,
         lines: [
           {
-            accountCode: '1010',
+            accountCode: usedCashAccount?.accountType === 'BANK' ? '1011' : '1010',
             debit: paidAmountDec,
             credit: 0,
             description: `Cash collection for ${invoice.invoiceNumber}`,
@@ -763,6 +770,13 @@ router.delete('/:id', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest
       throw new Error(`Sale invoice ID ${saleId} not found`);
     }
 
+    const existingReturns = await tx.salesReturn.count({
+      where: { salesInvoiceId: invoice.id },
+    });
+    if (existingReturns > 0) {
+      throw new Error(`Sale invoice ${invoice.invoiceNumber} has ${existingReturns} sales return(s). Delete returns first.`);
+    }
+
     // 1. Restore Stock Batches from Allocations
     for (const item of invoice.items) {
       for (const alloc of item.stockAllocations) {
@@ -786,39 +800,73 @@ router.delete('/:id', requireDeviceOrOwnerAuth, async (req: AuthenticatedRequest
       }
     }
 
-    // 3. Revert Customer Balance — always recalculate from surviving invoices
-    const survivingInvoices = await tx.salesInvoice.findMany({
-      where: { customerId: invoice.customerId, id: { not: invoice.id } },
-      select: { remainingBalance: true },
-    });
-    const newCustomerBalance = survivingInvoices.reduce(
+    // 3. Revert Customer Balance — recalculate from openingBalance, surviving invoices, and vouchers
+    const [survivingInvoices, custReceipts, custPayments] = await Promise.all([
+      tx.salesInvoice.findMany({
+        where: { customerId: invoice.customerId, id: { not: invoice.id } },
+        select: { remainingBalance: true },
+      }),
+      tx.receiptVoucher.findMany({
+        where: { partyType: 'CUSTOMER', partyId: invoice.customerId },
+        select: { amount: true },
+      }),
+      tx.paymentVoucher.findMany({
+        where: { partyType: 'CUSTOMER', partyId: invoice.customerId },
+        select: { amount: true },
+      }),
+    ]);
+    const survivingRemaining = survivingInvoices.reduce(
       (acc, inv) => acc.plus(new Decimal(inv.remainingBalance.toString())),
       new Decimal(0)
     );
+    const totalReceipts = custReceipts.reduce(
+      (acc, r) => acc.plus(new Decimal(r.amount.toString())),
+      new Decimal(0)
+    );
+    const totalPayments = custPayments.reduce(
+      (acc, p) => acc.plus(new Decimal(p.amount.toString())),
+      new Decimal(0)
+    );
+    const openingBal = new Decimal(invoice.customer.openingBalance.toString());
+    const newCustomerBalance = openingBal.plus(survivingRemaining).minus(totalReceipts).plus(totalPayments);
     await tx.customer.update({
       where: { id: invoice.customerId },
       data: {
         currentBalance: newCustomerBalance,
-        ...(newCustomerBalance.isZero() ? { openingBalance: new Decimal(0) } : {}),
       },
     });
 
-    // 4. Revert Cash/Bank Account if paid at counter
+    // 4. Find Journal Entries linked to this sale (before deleting, so we know which Cash/Bank account was used)
+    const journals = await tx.journalEntry.findMany({
+      where: { referenceType: 'SALE_INVOICE', referenceId: invoice.id },
+      include: { lines: { select: { accountId: true, debit: true } } },
+    });
+
+    // 5. Revert exact Cash/Bank Account if paid at counter
     if (new Decimal(invoice.paidAmount).greaterThan(0)) {
-      const cashAcct = await tx.cashBankAccount.findFirst();
-      if (cashAcct) {
+      const allCashAccts = await tx.cashBankAccount.findMany();
+      const cashGlMap = new Map(allCashAccts.map((a) => [a.glAccountId.toString(), a]));
+      let targetCashAcct = null;
+      for (const j of journals) {
+        for (const l of j.lines) {
+          if (new Decimal(l.debit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+            targetCashAcct = cashGlMap.get(l.accountId.toString())!;
+            break;
+          }
+        }
+        if (targetCashAcct) break;
+      }
+      if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+
+      if (targetCashAcct) {
         await tx.cashBankAccount.update({
-          where: { id: cashAcct.id },
+          where: { id: targetCashAcct.id },
           data: { currentBalance: { decrement: invoice.paidAmount } },
         });
       }
     }
 
-    // 5. Delete Journal Entries linked to this sale
-    const journals = await tx.journalEntry.findMany({
-      where: { referenceType: 'SALE_INVOICE', referenceId: invoice.id },
-      select: { id: true },
-    });
+    // 6. Delete Journal Entries linked to this sale
     for (const j of journals) {
       await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
       await tx.journalEntry.delete({ where: { id: j.id } });

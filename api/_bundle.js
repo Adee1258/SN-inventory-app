@@ -38351,16 +38351,43 @@ router3.post("/recalculate", requireOwnerAuth, async (_req, res) => {
         (acc, s) => acc.plus(new decimal_default(s.supplierPayable.toString())),
         new decimal_default(0)
       );
-      const settlements = await tx.supplierSettlement.findMany({
-        where: { supplierId: supp.id },
-        select: { netPaidAmount: true }
-      });
+      const [settlements, consCoa, supExpenses] = await Promise.all([
+        tx.supplierSettlement.findMany({
+          where: { supplierId: supp.id },
+          select: { netPaidAmount: true }
+        }),
+        tx.chartOfAccounts.findUnique({ where: { accountCode: "2020" }, select: { id: true } }),
+        tx.commissionExpense.findMany({
+          where: { notes: { contains: `SUPPLIER_ID:${supp.id}` } },
+          select: { amount: true }
+        })
+      ]);
       const settlementTotal = settlements.reduce(
         (acc, s) => acc.plus(new decimal_default(s.netPaidAmount.toString())),
         new decimal_default(0)
       );
+      const supExpenseTotal = supExpenses.reduce(
+        (acc, e) => acc.plus(new decimal_default(e.amount.toString())),
+        new decimal_default(0)
+      );
+      let consVoucherPaid = new decimal_default(0);
+      let consVoucherRefund = new decimal_default(0);
+      if (consCoa) {
+        const [pvs, rvs] = await Promise.all([
+          tx.paymentVoucher.findMany({
+            where: { partyType: "SUPPLIER", partyId: supp.id, debitAccountId: consCoa.id },
+            select: { amount: true }
+          }),
+          tx.receiptVoucher.findMany({
+            where: { partyType: "SUPPLIER", partyId: supp.id, creditAccountId: consCoa.id },
+            select: { amount: true }
+          })
+        ]);
+        consVoucherPaid = pvs.reduce((acc, p) => acc.plus(new decimal_default(p.amount.toString())), new decimal_default(0));
+        consVoucherRefund = rvs.reduce((acc, r) => acc.plus(new decimal_default(r.amount.toString())), new decimal_default(0));
+      }
       const newBalanceOwn = supp.purchaseInvoices.length === 0 && creditOpeningItems.length === 0 ? new decimal_default(0) : new decimal_default(supp.openingBalanceOwn.toString()).plus(purchaseRemaining).plus(rawCreditTotal);
-      const newBalanceCons = consignmentSales.length === 0 ? new decimal_default(0) : new decimal_default(supp.openingBalanceConsignment.toString()).plus(consignmentPayableTotal).minus(settlementTotal);
+      const newBalanceCons = consignmentSales.length === 0 && supExpenses.length === 0 ? new decimal_default(0) : new decimal_default(supp.openingBalanceConsignment.toString()).plus(consignmentPayableTotal).minus(supExpenseTotal).minus(settlementTotal).minus(consVoucherPaid).plus(consVoucherRefund);
       await tx.supplier.update({
         where: { id: supp.id },
         data: {
@@ -38968,21 +38995,6 @@ router6.get("/", async (_req, res) => {
   });
   return res.json({ success: true, data: purchases });
 });
-router6.get("/:id", async (req, res) => {
-  try {
-    const invoice = await prisma.purchaseInvoice.findUnique({
-      where: { id: BigInt(req.params.id) },
-      include: {
-        supplier: true,
-        items: { include: { item: true } }
-      }
-    });
-    if (!invoice) return res.status(404).json({ success: false, message: "Purchase invoice not found" });
-    return res.json({ success: true, data: invoice });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to fetch purchase invoice" });
-  }
-});
 router6.post("/", requireOwnerAuth, async (req, res) => {
   const validated = PurchaseCreateSchema.parse(req.body);
   const result = await dbTx(async (tx) => {
@@ -39135,15 +39147,22 @@ router6.post("/", requireOwnerAuth, async (req, res) => {
         }
       });
     }
+    let usedCashAccount = null;
     if (paidAmountDec.greaterThan(0)) {
-      let cashId = validated.cashBankAccountId ? BigInt(validated.cashBankAccountId) : null;
-      if (!cashId) {
-        const defaultCash = await tx.cashBankAccount.findFirst();
-        if (defaultCash) cashId = defaultCash.id;
+      if (validated.cashBankAccountId) {
+        usedCashAccount = await tx.cashBankAccount.findUnique({
+          where: { id: BigInt(validated.cashBankAccountId) },
+          select: { id: true, accountType: true }
+        });
       }
-      if (cashId) {
+      if (!usedCashAccount) {
+        usedCashAccount = await tx.cashBankAccount.findFirst({
+          select: { id: true, accountType: true }
+        });
+      }
+      if (usedCashAccount) {
         await tx.cashBankAccount.update({
-          where: { id: cashId },
+          where: { id: usedCashAccount.id },
           data: { currentBalance: { decrement: paidAmountDec } }
         });
       }
@@ -39158,7 +39177,7 @@ router6.post("/", requireOwnerAuth, async (req, res) => {
     ];
     if (paidAmountDec.greaterThan(0)) {
       journalLines.push({
-        accountCode: "1010",
+        accountCode: usedCashAccount?.accountType === "BANK" ? "1011" : "1010",
         debit: new decimal_default(0),
         credit: paidAmountDec,
         description: `Payment for purchase ${invoice.invoiceNumber}`
@@ -39380,19 +39399,31 @@ router6.delete("/:id", requireOwnerAuth, async (req, res) => {
         }
       });
     }
+    const journals = await tx.journalEntry.findMany({
+      where: { referenceType: "PURCHASE_INVOICE", referenceId: invoice.id },
+      include: { lines: { select: { accountId: true, credit: true } } }
+    });
     if (new decimal_default(invoice.paidAmount).greaterThan(0)) {
-      const cashAcct = await tx.cashBankAccount.findFirst();
-      if (cashAcct) {
+      const allCashAccts = await tx.cashBankAccount.findMany();
+      const cashGlMap = new Map(allCashAccts.map((a) => [a.glAccountId.toString(), a]));
+      let targetCashAcct = null;
+      for (const j of journals) {
+        for (const l of j.lines) {
+          if (new decimal_default(l.credit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+            targetCashAcct = cashGlMap.get(l.accountId.toString());
+            break;
+          }
+        }
+        if (targetCashAcct) break;
+      }
+      if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+      if (targetCashAcct) {
         await tx.cashBankAccount.update({
-          where: { id: cashAcct.id },
+          where: { id: targetCashAcct.id },
           data: { currentBalance: { increment: invoice.paidAmount } }
         });
       }
     }
-    const journals = await tx.journalEntry.findMany({
-      where: { referenceType: "PURCHASE_INVOICE", referenceId: invoice.id },
-      select: { id: true }
-    });
     for (const j of journals) {
       await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
       await tx.journalEntry.delete({ where: { id: j.id } });
@@ -39434,6 +39465,21 @@ router6.delete("/:id", requireOwnerAuth, async (req, res) => {
     };
   });
   return res.json({ success: true, data: result });
+});
+router6.get("/:id", async (req, res) => {
+  try {
+    const invoice = await prisma.purchaseInvoice.findUnique({
+      where: { id: BigInt(req.params.id) },
+      include: {
+        supplier: true,
+        items: { include: { item: true } }
+      }
+    });
+    if (!invoice) return res.status(404).json({ success: false, message: "Purchase invoice not found" });
+    return res.json({ success: true, data: invoice });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to fetch purchase invoice" });
+  }
 });
 var purchaseRoutes = router6;
 
@@ -39679,7 +39725,7 @@ router7.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
         }
       });
     }
-    await tx.commissionExpense.deleteMany({
+    const receiptExpenses = await tx.commissionExpense.findMany({
       where: {
         OR: [
           { description: { contains: receipt.receiptNumber } },
@@ -39687,6 +39733,18 @@ router7.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
         ]
       }
     });
+    if (receiptExpenses.length > 0) {
+      const expSum = receiptExpenses.reduce((acc, e) => acc.plus(e.amount), new decimal_default(0));
+      if (expSum.greaterThan(0)) {
+        await tx.supplier.update({
+          where: { id: supplierId },
+          data: { currentBalanceConsignment: { increment: expSum } }
+        });
+      }
+      await tx.commissionExpense.deleteMany({
+        where: { id: { in: receiptExpenses.map((e) => e.id) } }
+      });
+    }
     await tx.consignmentReceiptItem.deleteMany({
       where: { consignmentReceiptId: receipt.id }
     });
@@ -39705,12 +39763,16 @@ router7.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
       await tx.commissionAgreement.deleteMany({
         where: { supplierId }
       });
-      const [purchCount, saleCount, batchCount] = await Promise.all([
+      const [purchCount, saleCount, batchCount, settlementCount, advanceCount, returnCount, openingCount] = await Promise.all([
         tx.purchaseInvoice.count({ where: { supplierId } }),
         tx.salesInvoiceItem.count({ where: { supplierId } }),
-        tx.stockBatch.count({ where: { supplierId } })
+        tx.stockBatch.count({ where: { supplierId } }),
+        tx.supplierSettlement.count({ where: { supplierId } }),
+        tx.supplierAdvance.count({ where: { supplierId } }),
+        tx.consignmentReturn.count({ where: { supplierId } }),
+        tx.openingStockItem.count({ where: { supplierId } })
       ]);
-      if (purchCount === 0 && saleCount === 0 && batchCount === 0) {
+      if (purchCount === 0 && saleCount === 0 && batchCount === 0 && settlementCount === 0 && advanceCount === 0 && returnCount === 0 && openingCount === 0) {
         await tx.supplier.delete({ where: { id: supplierId } });
       } else {
         await tx.supplier.update({
@@ -39776,12 +39838,39 @@ router7.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
       });
     }
     if (receiptIds.length > 0) {
+      const receiptJournals = await tx.journalEntry.findMany({
+        where: { referenceType: "CONSIGNMENT_RECEIPT", referenceId: { in: receiptIds } },
+        select: { id: true }
+      });
+      if (receiptJournals.length > 0) {
+        const rjIds = receiptJournals.map((j) => j.id);
+        await tx.journalEntryLine.deleteMany({ where: { journalEntryId: { in: rjIds } } });
+        await tx.journalEntry.deleteMany({ where: { id: { in: rjIds } } });
+      }
       await tx.consignmentReceiptItem.deleteMany({
         where: { consignmentReceiptId: { in: receiptIds } }
       });
       await tx.consignmentReceipt.deleteMany({
         where: { id: { in: receiptIds } }
       });
+    }
+    const returns = await tx.consignmentReturn.findMany({
+      where: { supplierId: supplier.id },
+      select: { id: true }
+    });
+    if (returns.length > 0) {
+      const returnIds = returns.map((r) => r.id);
+      const returnJournals = await tx.journalEntry.findMany({
+        where: { referenceType: "CONSIGNMENT_RETURN", referenceId: { in: returnIds } },
+        select: { id: true }
+      });
+      if (returnJournals.length > 0) {
+        const retJIds = returnJournals.map((j) => j.id);
+        await tx.journalEntryLine.deleteMany({ where: { journalEntryId: { in: retJIds } } });
+        await tx.journalEntry.deleteMany({ where: { id: { in: retJIds } } });
+      }
+      await tx.consignmentReturnItem.deleteMany({ where: { consignmentReturnId: { in: returnIds } } });
+      await tx.consignmentReturn.deleteMany({ where: { id: { in: returnIds } } });
     }
     await tx.commissionExpense.deleteMany({
       where: {
@@ -39795,9 +39884,84 @@ router7.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
     await tx.commissionAgreement.deleteMany({
       where: { supplierId: supplier.id }
     });
-    await tx.supplierSettlement.deleteMany({
+    const allCashAccts = await tx.cashBankAccount.findMany();
+    const cashGlMap = new Map(allCashAccts.map((a) => [a.glAccountId.toString(), a]));
+    const settlements = await tx.supplierSettlement.findMany({
       where: { supplierId: supplier.id }
     });
+    for (const s of settlements) {
+      const journals = await tx.journalEntry.findMany({
+        where: { referenceType: "SUPPLIER_SETTLEMENT", referenceId: s.id },
+        include: { lines: { select: { accountId: true, credit: true } } }
+      });
+      if (new decimal_default(s.netPaidAmount).greaterThan(0)) {
+        let targetCashAcct = null;
+        for (const j of journals) {
+          for (const l of j.lines) {
+            if (new decimal_default(l.credit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+              targetCashAcct = cashGlMap.get(l.accountId.toString());
+              break;
+            }
+          }
+          if (targetCashAcct) break;
+        }
+        if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+        if (targetCashAcct) {
+          await tx.cashBankAccount.update({
+            where: { id: targetCashAcct.id },
+            data: { currentBalance: { increment: s.netPaidAmount } }
+          });
+        }
+      }
+      for (const j of journals) {
+        await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
+        await tx.journalEntry.delete({ where: { id: j.id } });
+      }
+      await tx.supplierAdvanceAllocation.deleteMany({ where: { supplierSettlementId: s.id } });
+    }
+    if (settlements.length > 0) {
+      await tx.supplierSettlement.deleteMany({
+        where: { supplierId: supplier.id }
+      });
+    }
+    const advances = await tx.supplierAdvance.findMany({
+      where: { supplierId: supplier.id }
+    });
+    for (const adv of advances) {
+      const journals = await tx.journalEntry.findMany({
+        where: { referenceType: "SUPPLIER_ADVANCE", referenceId: adv.id },
+        include: { lines: { select: { accountId: true, credit: true } } }
+      });
+      if (new decimal_default(adv.amount).greaterThan(0)) {
+        let targetCashAcct = null;
+        for (const j of journals) {
+          for (const l of j.lines) {
+            if (new decimal_default(l.credit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+              targetCashAcct = cashGlMap.get(l.accountId.toString());
+              break;
+            }
+          }
+          if (targetCashAcct) break;
+        }
+        if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+        if (targetCashAcct) {
+          await tx.cashBankAccount.update({
+            where: { id: targetCashAcct.id },
+            data: { currentBalance: { increment: adv.amount } }
+          });
+        }
+      }
+      for (const j of journals) {
+        await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
+        await tx.journalEntry.delete({ where: { id: j.id } });
+      }
+      await tx.supplierAdvanceAllocation.deleteMany({ where: { supplierAdvanceId: adv.id } });
+    }
+    if (advances.length > 0) {
+      await tx.supplierAdvance.deleteMany({
+        where: { supplierId: supplier.id }
+      });
+    }
     const linkedPaymentVouchers = await tx.paymentVoucher.findMany({
       where: {
         OR: [
@@ -39821,7 +39985,12 @@ router7.delete("/suppliers/:id", requireOwnerAuth, async (req, res) => {
       }
       await tx.paymentVoucher.delete({ where: { id: pv.id } });
     }
-    if (supplier.purchaseInvoices.length > 0) {
+    const [openingCount, purchaseReturnCount, remainingBatches] = await Promise.all([
+      tx.openingStockItem.count({ where: { supplierId: supplier.id } }),
+      tx.purchaseReturn.count({ where: { supplierId: supplier.id } }),
+      tx.stockBatch.count({ where: { supplierId: supplier.id } })
+    ]);
+    if (supplier.purchaseInvoices.length > 0 || openingCount > 0 || purchaseReturnCount > 0 || remainingBatches > 0) {
       await tx.supplier.update({
         where: { id: supplier.id },
         data: { currentBalanceConsignment: new decimal_default(0) }
@@ -39891,11 +40060,13 @@ router7.post("/settlements", requireOwnerAuth, async (req, res) => {
         currentBalanceConsignment: { decrement: settlementAmount }
       }
     });
+    let settlementCashType = "CASH";
     if (netCashPaid.greaterThan(0)) {
-      await tx.cashBankAccount.update({
+      const cashAcc = await tx.cashBankAccount.update({
         where: { id: BigInt(validated.cashBankAccountId) },
         data: { currentBalance: { decrement: netCashPaid } }
       });
+      settlementCashType = cashAcc.accountType;
     }
     const journalLines = [
       {
@@ -39919,7 +40090,7 @@ router7.post("/settlements", requireOwnerAuth, async (req, res) => {
     }
     if (netCashPaid.greaterThan(0)) {
       journalLines.push({
-        accountCode: "1010",
+        accountCode: settlementCashType === "BANK" ? "1011" : "1010",
         debit: new decimal_default(0),
         credit: netCashPaid,
         description: `Cash payout for settlement ${settlementNumber}`
@@ -40092,7 +40263,7 @@ router7.post("/advances", requireOwnerAuth, async (req, res) => {
           description: `Advance paid ${advanceNumber}`
         },
         {
-          accountCode: "1010",
+          accountCode: cashAccount.accountType === "BANK" ? "1011" : "1010",
           debit: new decimal_default(0),
           credit: advanceAmount,
           description: `Cash disbursement for advance ${advanceNumber}`
@@ -40122,8 +40293,7 @@ router7.get("/supplier-dashboard", async (_req, res) => {
       OR: [
         { consignmentReceipts: { some: {} } },
         { stockBatches: { some: { ownershipType: "CONSIGNMENT" } } }
-      ],
-      isActive: true
+      ]
     },
     include: {
       commissionAgreements: {
@@ -40185,12 +40355,22 @@ router7.get("/supplier-dashboard", async (_req, res) => {
       totalCommissionEarned = totalCommissionEarned.plus(si.commissionAmount);
       totalSupplierPayable = totalSupplierPayable.plus(si.supplierPayable);
     }
-    const settlements = await prisma.supplierSettlement.findMany({
-      where: { supplierId: supplier.id }
-    });
+    const [settlements, consCoa] = await Promise.all([
+      prisma.supplierSettlement.findMany({ where: { supplierId: supplier.id } }),
+      prisma.chartOfAccounts.findUnique({ where: { accountCode: "2020" }, select: { id: true } })
+    ]);
     let totalSettled = new decimal_default(0);
     for (const s of settlements) {
       totalSettled = totalSettled.plus(s.netPaidAmount);
+    }
+    if (consCoa) {
+      const suppPayments = await prisma.paymentVoucher.findMany({
+        where: { partyType: "SUPPLIER", partyId: supplier.id, debitAccountId: consCoa.id },
+        select: { amount: true }
+      });
+      for (const p of suppPayments) {
+        totalSettled = totalSettled.plus(p.amount);
+      }
     }
     const supExpenses = await prisma.commissionExpense.findMany({
       where: {
@@ -40272,7 +40452,7 @@ router7.get("/supplier-dashboard", async (_req, res) => {
         totalSupplierPayable: totalSupplierPayable.toFixed(4),
         totalSettled: totalSettled.toFixed(4),
         totalSupplierExpenses: totalSupplierExpenses.toFixed(4),
-        netCommissionFromSupplier: totalCommissionEarned.minus(totalSupplierExpenses).toFixed(4),
+        netCommissionFromSupplier: totalCommissionEarned.toFixed(4),
         hasExhaustedItems: items.some((i) => i.isExhausted),
         allItemsExhausted: items.length > 0 && items.every((i) => i.isExhausted)
       });
@@ -40308,26 +40488,54 @@ router7.get("/expenses", async (_req, res) => {
 });
 router7.post("/expenses", requireOwnerAuth, async (req, res) => {
   const rawItems = Array.isArray(req.body) ? req.body : Array.isArray(req.body?.expenses) ? req.body.expenses : [req.body];
-  const created = [];
-  for (const item of rawItems) {
-    const validated = CommissionExpenseSchema.parse(item);
-    const expense = await prisma.commissionExpense.create({
-      data: {
-        expenseDate: new Date(validated.expenseDate),
-        description: validated.description,
-        amount: toMoney(validated.amount),
-        category: validated.category,
-        notes: validated.notes
+  const created = await dbTx(async (tx) => {
+    const list = [];
+    for (const item of rawItems) {
+      const validated = CommissionExpenseSchema.parse(item);
+      const amtDec = toMoney(validated.amount);
+      const expense = await tx.commissionExpense.create({
+        data: {
+          expenseDate: new Date(validated.expenseDate),
+          description: validated.description,
+          amount: amtDec,
+          category: validated.category,
+          notes: validated.notes
+        }
+      });
+      if (validated.notes) {
+        const m = validated.notes.match(/SUPPLIER_ID:(\d+)/);
+        if (m) {
+          await tx.supplier.update({
+            where: { id: BigInt(m[1]) },
+            data: { currentBalanceConsignment: { decrement: amtDec } }
+          });
+        }
       }
-    });
-    created.push(expense);
-  }
+      list.push(expense);
+    }
+    return list;
+  });
   const isBatch = Array.isArray(req.body) || Array.isArray(req.body?.expenses);
   return res.status(201).json({ success: true, data: isBatch ? created : created[0] });
 });
 router7.delete("/expenses/:id", requireOwnerAuth, async (req, res) => {
-  await prisma.commissionExpense.delete({
-    where: { id: BigInt(req.params.id) }
+  await dbTx(async (tx) => {
+    const expense = await tx.commissionExpense.findUnique({
+      where: { id: BigInt(req.params.id) }
+    });
+    if (!expense) return;
+    if (expense.notes) {
+      const m = expense.notes.match(/SUPPLIER_ID:(\d+)/);
+      if (m) {
+        await tx.supplier.update({
+          where: { id: BigInt(m[1]) },
+          data: { currentBalanceConsignment: { increment: expense.amount } }
+        });
+      }
+    }
+    await tx.commissionExpense.delete({
+      where: { id: expense.id }
+    });
   });
   return res.json({ success: true });
 });
@@ -40552,14 +40760,19 @@ router7.post("/intake", requireOwnerAuth, async (req, res) => {
       }
     });
     if (extraCharges && parseFloat(extraCharges) > 0) {
+      const extraAmt = toMoney(extraCharges);
       await tx.commissionExpense.create({
         data: {
           expenseDate: receiptDate,
           description: `${description || "Bilti"} (${receiptNumber} - ${supplier.name})`,
-          amount: toMoney(extraCharges),
+          amount: extraAmt,
           category: "TRANSPORT",
           notes: `SUPPLIER_ID:${supplier.id}|SUPPLIER_NAME:${supplier.name}`
         }
+      });
+      await tx.supplier.update({
+        where: { id: supplier.id },
+        data: { currentBalanceConsignment: { decrement: extraAmt } }
       });
     }
     return {
@@ -40591,12 +40804,25 @@ router7.get("/final-summary", async (_req, res) => {
   for (const exp2 of expenses) {
     totalExpenses = totalExpenses.plus(exp2.amount);
   }
-  const settlements = await prisma.supplierSettlement.findMany();
+  const [settlements, consCoa] = await Promise.all([
+    prisma.supplierSettlement.findMany(),
+    prisma.chartOfAccounts.findUnique({ where: { accountCode: "2020" }, select: { id: true } })
+  ]);
   let totalSettled = new decimal_default(0);
   for (const s of settlements) {
     totalSettled = totalSettled.plus(s.netPaidAmount);
   }
-  const netCommission = totalCommissionEarned.minus(totalExpenses);
+  if (consCoa) {
+    const suppPayments = await prisma.paymentVoucher.findMany({
+      where: { partyType: "SUPPLIER", debitAccountId: consCoa.id },
+      select: { amount: true }
+    });
+    for (const p of suppPayments) {
+      totalSettled = totalSettled.plus(p.amount);
+    }
+  }
+  const netCommission = totalCommissionEarned;
+  const pendingSupplierPayable = totalSupplierPayable.minus(totalExpenses).minus(totalSettled);
   return res.json({
     success: true,
     data: {
@@ -40606,7 +40832,7 @@ router7.get("/final-summary", async (_req, res) => {
       totalExpenses: totalExpenses.toFixed(4),
       totalSettledToSuppliers: totalSettled.toFixed(4),
       netCommission: netCommission.toFixed(4),
-      pendingSupplierPayable: totalSupplierPayable.minus(totalSettled).toFixed(4)
+      pendingSupplierPayable: pendingSupplierPayable.toFixed(4)
     }
   });
 });
@@ -40864,15 +41090,22 @@ router8.post("/", requireDeviceOrOwnerAuth, async (req, res) => {
         }
       });
     }
+    let usedCashAccount = null;
     if (paidAmountDec.greaterThan(0)) {
-      let cashId = validated.cashBankAccountId ? BigInt(validated.cashBankAccountId) : null;
-      if (!cashId) {
-        const defaultCash = await tx.cashBankAccount.findFirst();
-        if (defaultCash) cashId = defaultCash.id;
+      if (validated.cashBankAccountId) {
+        usedCashAccount = await tx.cashBankAccount.findUnique({
+          where: { id: BigInt(validated.cashBankAccountId) },
+          select: { id: true, accountType: true }
+        });
       }
-      if (cashId) {
+      if (!usedCashAccount) {
+        usedCashAccount = await tx.cashBankAccount.findFirst({
+          select: { id: true, accountType: true }
+        });
+      }
+      if (usedCashAccount) {
         await tx.cashBankAccount.update({
-          where: { id: cashId },
+          where: { id: usedCashAccount.id },
           data: { currentBalance: { increment: paidAmountDec } }
         });
       }
@@ -40964,7 +41197,7 @@ router8.post("/", requireDeviceOrOwnerAuth, async (req, res) => {
         narration: hasConsignmentItems ? `Counter collection for consignment sale invoice ${invoice.invoiceNumber}` : `Counter collection for sale invoice ${invoice.invoiceNumber}`,
         lines: [
           {
-            accountCode: "1010",
+            accountCode: usedCashAccount?.accountType === "BANK" ? "1011" : "1010",
             debit: paidAmountDec,
             credit: 0,
             description: `Cash collection for ${invoice.invoiceNumber}`
@@ -41230,6 +41463,12 @@ router8.delete("/:id", requireDeviceOrOwnerAuth, async (req, res) => {
     if (!invoice) {
       throw new Error(`Sale invoice ID ${saleId} not found`);
     }
+    const existingReturns = await tx.salesReturn.count({
+      where: { salesInvoiceId: invoice.id }
+    });
+    if (existingReturns > 0) {
+      throw new Error(`Sale invoice ${invoice.invoiceNumber} has ${existingReturns} sales return(s). Delete returns first.`);
+    }
     for (const item of invoice.items) {
       for (const alloc of item.stockAllocations) {
         await tx.stockBatch.update({
@@ -41249,34 +41488,65 @@ router8.delete("/:id", requireDeviceOrOwnerAuth, async (req, res) => {
         });
       }
     }
-    const survivingInvoices = await tx.salesInvoice.findMany({
-      where: { customerId: invoice.customerId, id: { not: invoice.id } },
-      select: { remainingBalance: true }
-    });
-    const newCustomerBalance = survivingInvoices.reduce(
+    const [survivingInvoices, custReceipts, custPayments] = await Promise.all([
+      tx.salesInvoice.findMany({
+        where: { customerId: invoice.customerId, id: { not: invoice.id } },
+        select: { remainingBalance: true }
+      }),
+      tx.receiptVoucher.findMany({
+        where: { partyType: "CUSTOMER", partyId: invoice.customerId },
+        select: { amount: true }
+      }),
+      tx.paymentVoucher.findMany({
+        where: { partyType: "CUSTOMER", partyId: invoice.customerId },
+        select: { amount: true }
+      })
+    ]);
+    const survivingRemaining = survivingInvoices.reduce(
       (acc, inv) => acc.plus(new decimal_default(inv.remainingBalance.toString())),
       new decimal_default(0)
     );
+    const totalReceipts = custReceipts.reduce(
+      (acc, r) => acc.plus(new decimal_default(r.amount.toString())),
+      new decimal_default(0)
+    );
+    const totalPayments = custPayments.reduce(
+      (acc, p) => acc.plus(new decimal_default(p.amount.toString())),
+      new decimal_default(0)
+    );
+    const openingBal = new decimal_default(invoice.customer.openingBalance.toString());
+    const newCustomerBalance = openingBal.plus(survivingRemaining).minus(totalReceipts).plus(totalPayments);
     await tx.customer.update({
       where: { id: invoice.customerId },
       data: {
-        currentBalance: newCustomerBalance,
-        ...newCustomerBalance.isZero() ? { openingBalance: new decimal_default(0) } : {}
+        currentBalance: newCustomerBalance
       }
     });
+    const journals = await tx.journalEntry.findMany({
+      where: { referenceType: "SALE_INVOICE", referenceId: invoice.id },
+      include: { lines: { select: { accountId: true, debit: true } } }
+    });
     if (new decimal_default(invoice.paidAmount).greaterThan(0)) {
-      const cashAcct = await tx.cashBankAccount.findFirst();
-      if (cashAcct) {
+      const allCashAccts = await tx.cashBankAccount.findMany();
+      const cashGlMap = new Map(allCashAccts.map((a) => [a.glAccountId.toString(), a]));
+      let targetCashAcct = null;
+      for (const j of journals) {
+        for (const l of j.lines) {
+          if (new decimal_default(l.debit).greaterThan(0) && cashGlMap.has(l.accountId.toString())) {
+            targetCashAcct = cashGlMap.get(l.accountId.toString());
+            break;
+          }
+        }
+        if (targetCashAcct) break;
+      }
+      if (!targetCashAcct) targetCashAcct = allCashAccts[0] ?? null;
+      if (targetCashAcct) {
         await tx.cashBankAccount.update({
-          where: { id: cashAcct.id },
+          where: { id: targetCashAcct.id },
           data: { currentBalance: { decrement: invoice.paidAmount } }
         });
       }
     }
-    const journals = await tx.journalEntry.findMany({
-      where: { referenceType: "SALE_INVOICE", referenceId: invoice.id },
-      select: { id: true }
-    });
     for (const j of journals) {
       await tx.journalEntryLine.deleteMany({ where: { journalEntryId: j.id } });
       await tx.journalEntry.delete({ where: { id: j.id } });
@@ -42593,6 +42863,22 @@ router10.delete("/receipts/:id", requireOwnerAuth, async (req, res) => {
           where: { id: voucher.partyId },
           data: { currentBalance: { increment: voucher.amount } }
         });
+      }
+    } else if (voucher.partyType === "SUPPLIER" && voucher.partyId) {
+      const supp = await tx.supplier.findUnique({ where: { id: voucher.partyId } });
+      if (supp) {
+        const creditAcc = await tx.chartOfAccounts.findUnique({ where: { id: voucher.creditAccountId } });
+        if (creditAcc?.accountCode === "2020") {
+          await tx.supplier.update({
+            where: { id: voucher.partyId },
+            data: { currentBalanceConsignment: { decrement: voucher.amount } }
+          });
+        } else if (creditAcc?.accountCode === "2010") {
+          await tx.supplier.update({
+            where: { id: voucher.partyId },
+            data: { currentBalanceOwn: { decrement: voucher.amount } }
+          });
+        }
       }
     } else if (voucher.partyType === "EMPLOYEE" && voucher.partyId) {
       const emp = await tx.employee.findUnique({ where: { id: voucher.partyId } });
